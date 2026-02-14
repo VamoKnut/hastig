@@ -1,0 +1,133 @@
+////////////////////////////////// Project start
+
+I want you to design and implement a complete application for an embedded, battery powered controller.
+
+
+Goal:
+Make a device that samples conductivity using a modbusRTU based sensor, sends data vi mqtt to a server. 
+Between sessions, the controller will stay in deep sleep mode, waking on RTC. The server sends command or scheduling 
+information to the device via mqtt, orchestrating periods of activity and sleep.
+
+Target platform:
+- MCU: Portenta H7 (M7 core)
+- Framework: Arduino + mbed
+- RTOS: mbed RTOS
+- Tooling: PlatformIO
+- Language: C++
+
+Architecture:
+- RTOS-based
+- Separate threads for:
+  - sensor sampling.
+  - Short-term aggregation (typically 1 Hz sampling, 10-15 seconds aggregation)
+  - communication using Portenta CatM NBIoT shield. and mqtt communcation (no SSL)
+  - User interface, consisting of a 128x64 OLED I2C display and a four button keyboard.
+
+- Inter-thread communication:
+  - rtos::Mail for communcation between sensor samplign thread and aggreation thread and also between aggregation thread and communcation thread. 
+
+Application settings must be stored in flash. settings typically will include:
+- Sensor address (8-bit uint)
+- Sensor baudrate and serial parameters (parity, bits etc)
+- default sampling rate in milliseconds between samples
+- Aggreagation period in seconds
+- Server address (IP or named url)
+- mqtt port, credentials an ClientID
+- A friendley-name of th is device
+
+Settings hould be accessible in a global, thread-safe way for both reading and writing. 
+
+Aggreagation involves calculating average, min and max values in the interval. The aggreation 
+method should be clearly separated and atmoic for further improvements later in the development.
+
+Each sampling session should have a unique "sessionID", this should either be a locally 
+created GUID or an ID comming from the server. Timing withing the session is important; at the 
+start of a new session a reference time should be recorded and each outgoing packet should contain 
+start and end markers relativt to this reference time (i.e. the validity interval of each aggregated packet)
+
+Typically, the device will be in three disitnct states
+ - Deep sleep state, waking up on RTC
+ - Aware state, Connected to mqtt awaiting commands to start sampling. When entering aware state, the device will send 
+ a mqtt message to the server indicating it is awake. Being in the aware state, four things might happen:
+  - No respons from server. Go back to regular sleep after a timeout period.
+  - the server sends a "Sleep for this amount of time"
+  - The server sends a "Start sampling" request.
+- Sampling state
+  - The device constantly samples sensor, aggregate samples and send packets back to server on MQTT bus. The device 
+  expecte messages to be acknowledged by the server, but does not do retransmitts. If no acknowledge is revieved after 
+  a configurable number of packets, the device should shut down. basically, the acknowledge package is a "keep sampling2
+  command. If souck message is not recieved regularly, device shoudl assume serevr is shut down and should go back to 
+  aware state and eventually fall back to deep sleep.
+
+During aware or sampling states, the server might send reconfiguration messages to the device.
+
+I'll be using my own menu system. Today this uses a classic subscribe / notify approach. classes 
+consuming menu notifications, implement a onItemSelectedEvent. The event data is a JsonVariantConst object
+with atleast a "topic" and "value" field. This subscription mechanism can be changed if it fitts bad with the mbed 
+and multi threaded approach. 
+The controll of OLED display is done using the U8G2 library. The keyboard is connected to digital pin D0, D1, D4 and D5. 
+
+THe sensor interface is realized using an external RS485 driver. The serial interface is connected to starndard UART pins D12, D14. 
+Transmitt / secieved is toggeled using pin D7. the ArduinoModbus library is used.
+
+Power to sensor and external interfaces is controleld with pin D2
+
+The c++ code should be kept fairly basic and easy to read. I'm an intermediat, old-school programmer. Follow my prviously uploaded .clang file. 
+Add a basic comment section above each method, both for visual clarity and documentational purposes.
+
+//// Redesign
+Keep current code base (v 17) a a basline, as it it working fairly good at the moment. Still, I want to do some larger changes.
+
+1) The orchestrating thread should not sleep until the commsPump is up and running and has been running for at least 30 seconds. 
+This will make sure any reconfiguration is recieved before commsPump is taken down. If a connection to mqtt server can not be established in two minutes (set in AppConfig), 
+the application should go into deep sleep for 15 minutes to conserve power (shutdown-code "No nettwork" - see below).
+
+2) We must prepare for true deep sleep. After deep sleep the mcu wakes up as after a reset. We therefor need to keep track of the 
+reason for restart in battery backuped RAM. probably the RTC chip registers is the best placec to store this. I suggest we set this register to a code named "Unexpected reboot" at startup.
+Before a controlled shutdown we set it to "Low power wakeup". Lets prepare for future new codes ("Brown-out", "Emergency power save" etc). This code should also be sent to the server when 
+the controller wakes up and sends its "aware" message.
+Before deep sleep, all threads should be fully shut down and terminated. I would suggest that the actual shutdown code is executed from the original arduino loop function. Reason: When running a non-mbed 
+threaded application, the board uses approximately 350 microampere in shutdown mode. When executing the same code within a mbed thread, the current consumption is 1.4 milliampere. 
+
+3) Sleep pattern: 
+ - The device stays in aware mode for 10 minutes after last activity (incomming mqtt messages, sampling etc). It goes into deep sleep for 60 minutes by default. (both intervalls set in application settings, stored in flash)
+ - The server can instruct the device to go into deep sleep for a periode. (maximum 12 hours). This should be executed immediately when command is recieved - even if in sampling mode. Gracefully shut down.
+ - In a low batter situation, the device should send a cry for help if in aware or sampling mode. ("Low battery detected. Emergency sleep for 12 hours!"). deep sleep initiated by 
+ low battery should last for 12 hours (application settings) to allow for charging by solar power.
+
+4) The start sampling mqtt message should  have "type": "startSampling". It should be possible to override the sampling interval and aggregation shored in applation settings, with 
+keys like "samplingInteval", "aggregationPeriod", "aggregationMethod". The command to stop sampling should have type "stopSampling".
+
+5) Use camelCasing for all json keys
+
+6) Use the term "hibernat" "hibernating" etc for terms related to deep sleep, in code, settings, messages.
+
+7) We ned to pull out battery and power status using the Board and Battery classes. We will use the battery.voltage(), battery.minimumVoltage(), battery.current() and battery.averageCurrent() methods. 
+These values should be sent to the server in a "Status" message at regular interval (every 10 minutes in aware and sampling mode), at start-up and when going into hibernate mode. We need to 
+implement an incomming mqtt message resetting the battery statistics, using resetMaximumMinimumCurrent() and resetMaximumMinimumVoltage() ("Type": "resetBatteryStatistics")
+At every poll of battery information, we do a check for low power situation. The default check is for minimumVoltage < 2.8V (configurable in application settings / flash. If below this limit, 
+send a "Critically low battery" warning and then hibernate after a period of 60 seconds with a sleep status of "Emergency power save". Send a last message before hibernating 
+
+8) The device will report if self as in three diferent modes; "aware", "sampling" or "hibernating". when sending status "hibernating" there should be a key "reason" indicating why we went to 
+hibernate mode, "inactivity", "forced", "emergencyPowerSave" and a "expectedDuration" key stating the estimated inteval before wake-up.
+
+8) remove the CommsThread code and references from the project.
+
+////////////////////////
+a few things to do:
+1) Remove all legacy or backward compatibility code and mqtt message parsing. Stick to the newest additions, words in camelCasing and only one keyword for each type of message.
+2) make a separat topic postfix for configuration commands (".../cfg"). Use the cmd topic only for actions 
+3) check how the "normalt" aware timeout is implemented, and the mqtt message sent specifically. Seems that the reason 
+and expected hibernate duration is left out of the message.
+4) clamp the sampling interval to minimum 200 milliseconds.
+5) add a warmup period after the power to sensor and RS485 driver is applied and the communication with sensors starts. Let this be 
+configurable and set default to 4000 ms.
+6) Add a sensor-type settings. I'll use this later, so just make provision for this setting as a unsigned integer ("sensorType"). Default value "1"
+7) I want to rredesign the sensor concept and have an abstract sensorclass with dereived, specific sensor implementations. Spesific sensortypes should be instantiated
+through a factory method of the abstract sensorClass based on sensorType. Make three specific sensortype as start. 
+Sensor type 0:  A "fake" sensor producing values as today stub with the two parameters "cond" and "temp". Call the sensor "fake"
+Sensor type 1: This will be a modbus-based sensor as the exisitng code has today. Call the sensor "seametricsCT2X"
+Sesnor type 2: This is similar to type 1, but called "PT12" and produces "level" and "temp" samples.
+8) I want the name of values (parameters) returned from the sensors to be determined by each specific sensor implementation (i.e. "cond" or "level").
+A sensor can at most return two sample values. (just like todays implementation). Both values are to be treated as the aggregator does today.
+9) add a command "oneShotSample" that takes one sample from the sensors and sends the result back via mqtt. 
