@@ -38,6 +38,9 @@ static SystemContext sysCtx(g_board, restartReason, kWakePin);
 
 static const char* TAG = "HASTIG";
 
+// Route mbed stdio to USB CDC so default UART console does not claim D13/D14.
+REDIRECT_STDOUT_TO(SerialUSB);
+
 
 void setup()
 {
@@ -54,7 +57,7 @@ void setup()
   delay(2500);
   Logger::set_runtime_level(Logger::Level::Debug);
 
-  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: v105) ===");
+  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: v110) ===");
 
   
 
@@ -106,6 +109,7 @@ void setup()
 void loop()
 {
   sysCtx.commsPump.loopOnce();
+
   handleSerialConsole(sysCtx.settings);
 
   // Execute sleep transaction if requested by Orchestrator.
@@ -114,4 +118,3 @@ void loop()
   // Keep loop responsive; other RTOS threads run independently.
   rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));
 }
-

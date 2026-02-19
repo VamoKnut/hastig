@@ -17,7 +17,7 @@ template <uint32_t DEPTH>
 using OneShotMail = rtos::Mail<SensorSampleMsg, DEPTH>;
 
 /**
- * @brief Sensor sampling thread (Modbus RTU conductivity sensor).
+ * @brief Sensor sampling thread.
  */
 class SamplingThread {
 public:
@@ -57,14 +57,6 @@ private:
 
   Sensor* _sensor = nullptr;
 
-  bool _modbusReady = false;
-
   static void threadEntry(void* ctx);
   void run();
-
-  bool initModbus();
-  void deinitModbus();
-
-  bool readConductivity(float& outValue);
-  bool readTemperature(float& outTempC);
 };

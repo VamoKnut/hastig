@@ -15,12 +15,12 @@ static constexpr int PIN_BTN_DOWN    = D2;
 static constexpr int PIN_BTN_RIGHT  = D1;
 
 // RS485 / sensor power
-static constexpr int PIN_RS485_DE_RE  = D7;
+static constexpr int PIN_RS485_DE_RE  = D6;
 static constexpr int PIN_POWER_ENABLE = D3;
 
 // UART pins (Portenta)
-static constexpr int PIN_RS485_RX = D14;
-static constexpr int PIN_RS485_TX = D12;
+static constexpr int PIN_RS485_RX = D13;
+static constexpr int PIN_RS485_TX = D14;
 
 // ---------------- Thread priorities ----------------
 static constexpr osPriority PRIO_ORCH  = osPriorityNormal;
@@ -33,7 +33,7 @@ static constexpr osPriority PRIO_UI    = osPriorityLow;
 static constexpr uint32_t STACK_ORCH  = 6 * 1024;
 static constexpr uint32_t STACK_COMMS = 14 * 1024;
 static constexpr uint32_t STACK_AGG   = 6 * 1024;
-static constexpr uint32_t STACK_SENS  = 6 * 1024;
+static constexpr uint32_t STACK_SENS  = 14 * 1024;
 static constexpr uint32_t STACK_UI    = 6 * 1024;
 
 // ---------------- Mail queue depths ----------------
@@ -51,6 +51,17 @@ static constexpr const char* MQTT_TOPIC_PREFIX = "hastigNode";
 static constexpr const char* MQTT_TOPIC_POSTFIX_CMD = "cmd";
 static constexpr const char* MQTT_TOPIC_POSTFIX_CFG = "cfg";
 static constexpr uint32_t MIN_SAMPLE_PERIOD_MS = 200;
+
+// ---------------- Seametrics A/B toggles ----------------
+// Keep these as controlled diagnostics while narrowing the MQTT stall root cause.
+// Step A (current): DE toggle ON, IRQ masking OFF.
+#ifndef HASTIG_SEAMETRICS_DE_TOGGLE
+#define HASTIG_SEAMETRICS_DE_TOGGLE 1
+#endif
+
+#ifndef HASTIG_SEAMETRICS_SOFTUART_IRQ_MASK
+#define HASTIG_SEAMETRICS_SOFTUART_IRQ_MASK 0
+#endif
 
 
 // Grace time after publishing final status before hibernate.

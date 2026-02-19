@@ -11,7 +11,7 @@
 struct AppSettings {
   uint32_t version = 1;
 
-  // Sensor / Modbus
+  // Sensor serial settings
   uint8_t  sensor_addr = 1;
   uint32_t sensor_baud = 9600;
 

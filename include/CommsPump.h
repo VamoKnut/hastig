@@ -77,6 +77,7 @@ private:
 
   bool     _netConnected  = false;
   bool     _mqttConnected = false;
+  bool     _subscriptionsReady = false;
   uint32_t _lastNetOkMs   = 0;
   uint32_t _lastMqttOkMs  = 0;
 

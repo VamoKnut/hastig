@@ -43,7 +43,7 @@ void printSettingsToSerial(const SettingsManager& settingsManager, Stream& out)
 
   out.println("--- Hastig config ---");
 
-  // Sensor / Modbus
+  // Sensor serial settings
   printKvU32(out, "sensorAddress", (uint32_t)s.sensor_addr);
   printKvU32(out, "sensorBaudrate", s.sensor_baud);
   printKvU32(out, "sensorWarmupMs", s.sensor_warmup_ms);

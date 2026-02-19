@@ -1,7 +1,6 @@
 #include "CommsPump.h"
 #include "DeviceIdentity.h"
 #include "ProtocolCodec.h"
-#include "BoardHal.h"
 #include "Logger.h"
 #include "TimeUtil.h"
 
@@ -49,6 +48,8 @@ void CommsPump::begin()
 {
   _bootMs = timeutil::nowMs();
   mqtt.setCallback(CommsPump::mqttCallbackTrampoline);
+  mqtt.setSocketTimeout(2);
+  mqtt.setKeepAlive(30);
   postEvent(CommsEventType::Boot, "boot", "comms pump ready");
 }
 
@@ -123,6 +124,7 @@ void CommsPump::teardownLinks(bool endGsm)
     }
   }
   _mqttConnected = false;
+  _subscriptionsReady = false;
 
   if (gsmClient.connected()) {
     LOGI(TAG, "teardownLinks: gsmClient.stop()");
@@ -222,12 +224,24 @@ bool CommsPump::ensureMqtt()
     (void)protocol::buildTopic(_topicCfg, sizeof(_topicCfg), MQTT_TOPIC_PREFIX, node, MQTT_TOPIC_POSTFIX_CFG);
     (void)protocol::buildTopic(_topicData, sizeof(_topicData), MQTT_TOPIC_PREFIX, node, "data");
     (void)protocol::buildTopic(_topicStatus, sizeof(_topicStatus), MQTT_TOPIC_PREFIX, node, "status");
+    _subscriptionsReady = false;
   }
 
   mqtt.setServer(s.mqtt_host, (uint16_t)s.mqtt_port);
   mqtt.setBufferSize(512);
 
   if (mqtt.connected()) {
+    if (!_subscriptionsReady) {
+      const bool subCmd = mqtt.subscribe(_topicCmd);
+      const bool subCfg = mqtt.subscribe(_topicCfg);
+      if (!subCmd || !subCfg) {
+        LOGW(TAG, "MQTT subscribe failed while connected (cmd=%d cfg=%d)", subCmd ? 1 : 0, subCfg ? 1 : 0);
+        teardownLinks(false);
+        postEvent(CommsEventType::MqttDown, "mqtt", "subscribe_fail");
+        return false;
+      }
+      _subscriptionsReady = true;
+    }
     _mqttConnected = true;
     _lastMqttOkMs  = timeutil::nowMs();
     return true;
@@ -273,8 +287,15 @@ bool CommsPump::ensureMqtt()
   }
 
   if (connected) {
-  mqtt.subscribe(_topicCmd);
-  mqtt.subscribe(_topicCfg);
+    const bool subCmd = mqtt.subscribe(_topicCmd);
+    const bool subCfg = mqtt.subscribe(_topicCfg);
+    if (!subCmd || !subCfg) {
+      LOGW(TAG, "MQTT subscribe failed after connect (cmd=%d cfg=%d)", subCmd ? 1 : 0, subCfg ? 1 : 0);
+      teardownLinks(false);
+      postEvent(CommsEventType::MqttDown, "mqtt", "subscribe_fail");
+      return false;
+    }
+    _subscriptionsReady = true;
     _mqttConnected = true;
     _mqttFailCount = 0;
     _lastMqttOkMs  = timeutil::nowMs();
@@ -312,14 +333,7 @@ if (extraJsonKVsOrNull != nullptr && extraJsonKVsOrNull[0] != '\0') {
     }
   }
 
-  char out[512];
-  serializeJson(doc, out, sizeof(out));
-
-  const bool ok = mqtt.publish(_topicStatus, out);
-  if (!ok) {
-    postEvent(CommsEventType::PublishFailed, _topicStatus, "publish status failed");
-  }
-  return ok;
+  return publishJson(_topicStatus, doc);
 }
 
 
@@ -452,8 +466,6 @@ void CommsPump::mqttCallbackTrampoline(char* topic, uint8_t* payload, unsigned i
  */
 void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
 {
-  BoardHal::blinkLed(BoardHal::LedColor::Red, 100);
-
   // Copy payload to a null-terminated buffer on stack.
   char buf[256];
   const size_t n = (len < sizeof(buf) - 1u) ? (size_t)len : (sizeof(buf) - 1u);
@@ -467,6 +479,7 @@ void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
   //  - /cmd payloads are forwarded to Orchestrator
   if (protocol::topicHasPostfix(t, MQTT_TOPIC_POSTFIX_CFG)) {
     const bool ok = _settings.applyJson(buf, true);
+    _topicCmd[0] = '\0';
     LOGI(TAG, "RX cfg topic=%s applied=%d payload=%s", t, ok ? 1 : 0, buf);
     return;
   }
@@ -496,13 +509,16 @@ void CommsPump::loopOnce()
   }
 
   // Maintain connections + process inbound MQTT
+
   if (_wantConnected) {
+
     if (!mqtt.connected()) {
       (void)ensureMqtt();
     }
 
     // PubSubClient::loop() returns bool in most versions; if it fails, drop the link and reconnect later.
     const bool loopOk = mqtt.loop();
+
     if (!loopOk && !mqtt.connected()) {
       postEvent(CommsEventType::MqttDown, "mqtt", "loop_fail");
       teardownLinks(false);
@@ -510,13 +526,24 @@ void CommsPump::loopOnce()
   }
 
   // Drain aggregates and publish
-  while (true) {
+  uint8_t publishedThisLoop = 0;
+  while (publishedThisLoop < 4u) {
     AggregateMsg* a = _inbox.tryGetAggregate();
     if (a == nullptr) {
       break;
     }
     (void)publishAggregate(*a);
     _inbox.freeAggregate(a);
+    publishedThisLoop++;
+
+    if (_wantConnected && mqtt.connected()) {
+      const bool loopOk = mqtt.loop();
+      if (!loopOk && !mqtt.connected()) {
+        postEvent(CommsEventType::MqttDown, "mqtt", "loop_fail");
+        teardownLinks(false);
+        break;
+      }
+    }
   }
 }
 
@@ -566,8 +593,12 @@ bool CommsPump::publishJson(const char* topic, const JsonDocument& doc)
   // Use the C-string publish overload so the payload length is derived from strlen().
   // This keeps the MQTT payload clean when receivers assume null-termination.
   const bool ok = mqtt.publish(topic, buf);
-  if (ok) {
-    BoardHal::blinkLed(BoardHal::LedColor::Blue, 100);
+  if (!ok) {
+    postEvent(CommsEventType::PublishFailed, topic, "publish failed");
+    if (!mqtt.connected()) {
+      postEvent(CommsEventType::MqttDown, "mqtt", "publish_disconnected");
+      teardownLinks(false);
+    }
   }
   return ok;
 }
