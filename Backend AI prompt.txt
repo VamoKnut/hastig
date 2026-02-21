@@ -1,11 +1,14 @@
-I want to prototype a full-stack applciation called "HASTIG"
+I want to prototype a full-stack application called "HASTIG"
 The purpose is to perform water discharge measurements using salt dilution method. The system will use remote, lowpower IoT nodes ("sensor nodes") in rivers to measure conductivity.
 
-THe backend will communicate with the sensor nodes using MQTT. THe web ui will consist of two parts. One mamangement part or "dashbord" used by 
-hydrologist to define "projects", assign equipment and personel to proejcts and give location data to such objects. The second part will be used by persons in the field ("Care takers"), to orchestrate 
+The backend will communicate with the sensor nodes using MQTT. THe web ui will consist of two parts. One mamangement part or "dashbord" used by 
+hydrologist to define "projects", assign equipment and personel to projects and assign location data to such objects. The second part will be used by persons in the field ("Care takers"), to orchestrate 
 the injection of salt at specific sites.
 
 Well use the term "project" for the setting up of a site, consisting of one or more sensors (hardware at a specific location), care takers (one or more persons actually injecting salt in the river) and drop-sites 
-(basically coordinates with a name and decription that will be used for individual gaugings. We will indicate for care takers hwo much salt they are expected to inject for each gauging in advance.
+(basically coordinates with a name and decription that will be used for individual gaugings). We will indicate for care takers how much salt they are expected to inject for each gauging in advance.
 
-All activity, planning, settings and results for a gauging is contained in a "campaign". A campaign has a life cycle
+All activity, planning, settings and results for one specific gauging is contained in a "campaign". A campaign has a life cycle containing the following stages:
+1) planning. The Hydrologist (or future automatic forecasting sub-system) see the need for a guaging at a location. The hydrologist will indicate a timeframe (earliest and latest time of the gauging) for the 
+gauging to be performed. This desition is based on en estimation of upcomming discharge of interest.
+2) Notifying care-takers. When a campaign is planned, the care-takers assigned to the proejct will be notified of the need of their service.

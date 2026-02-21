@@ -57,7 +57,7 @@ void setup()
   delay(2500);
   Logger::set_runtime_level(Logger::Level::Debug);
 
-  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: v110) ===");
+  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: v123) ===");
 
   
 

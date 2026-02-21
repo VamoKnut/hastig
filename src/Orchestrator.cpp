@@ -13,7 +13,6 @@
 
 #include "Logger.h"
 #include "StopUtil.h"
-#include "PowerUtil.h"
 #include "TimeUtil.h"
 
 #include "ProtocolCodec.h"
@@ -74,37 +73,40 @@ void Orchestrator::enterState(State s)
 {
   const State prevState = _state;
 
-  const auto stateToMode = [](State st) -> const char* {
-    switch (st) {
-      case State::Aware:
-        return "aware";
-      case State::Sampling:
-        return "sampling";
-      case State::Hibernating:
-        return "hibernate";
-      case State::BootWaitComms:
-        // Treat boot as a transition from deep sleep.
-        return "hibernate";
-      default:
-        return "";
-    }
-  };
+  const char* previousMode = "";
+  switch (prevState) {
+    case State::Aware:
+      previousMode = "aware";
+      break;
+    case State::Sampling:
+      previousMode = "sampling";
+      break;
+    case State::Hibernating:
+      previousMode = "hibernating";
+      break;
+    default:
+      break;
+  }
 
-  const char* previousMode = stateToMode(prevState);
-  const char* newMode      = stateToMode(s);
+  const char* newMode = "";
+  switch (s) {
+    case State::Aware:
+      newMode = "aware";
+      break;
+    case State::Sampling:
+      newMode = "sampling";
+      break;
+    case State::Hibernating:
+      newMode = "hibernating";
+      break;
+    default:
+      break;
+  }
   const bool  isModeChange = (previousMode[0] != '\0') && (newMode[0] != '\0') && (strcmp(previousMode, newMode) != 0);
 
   _state        = s;
   _stateEnterMs = timeutil::nowMs();
   _lastActivityMs = _stateEnterMs;
-
-  if (s == State::BootWaitComms) {
-    _sensor.setEnabled(false);
-    _agg.setEnabled(false);
-    LOGI(TAG, "State=BootWaitComms");
-    _commsEgress.connect();
-    return;
-  }
 
   if (s == State::Aware) {
     LOGI(TAG, "State=aware");
@@ -113,8 +115,8 @@ void Orchestrator::enterState(State s)
     _sensor.setEnabled(false);
     _agg.setEnabled(false);
 
-    _unackedPkts = 0;
     _lastAckMs   = 0;
+    _unackedAggregateCount = 0;
     if (isModeChange) {
       _commsEgress.publishModeChange("aware", previousMode);
     } else {
@@ -125,14 +127,13 @@ void Orchestrator::enterState(State s)
 
   if (s == State::Sampling) {
     LOGI(TAG, "State=sampling");
-    _unackedPkts = 0;
     _lastAckMs   = timeutil::nowMs();
+    _unackedAggregateCount = 0;
     _sensor.setEnabled(true);
     _agg.setEnabled(true);
     if (isModeChange) {
       _commsEgress.publishModeChange("sampling", previousMode);
     }
-    _commsEgress.startSamplingSession();
     return;
   }
 
@@ -146,7 +147,7 @@ void Orchestrator::enterState(State s)
     if (_hibernateReason == HibernateReason::Forced) {
       reasonStr = "forced";
     } else if (_hibernateReason == HibernateReason::EmergencyPowerSave) {
-      reasonStr = "lowPower";
+      reasonStr = "emergencyPowerSave";
     } else if (_hibernateReason == HibernateReason::NoNetwork) {
       reasonStr = "noNetwork";
     }
@@ -163,15 +164,16 @@ void Orchestrator::enterState(State s)
 /**
  * @brief Handle server command message.
  *
- * Expected JSON patterns (examples):
- *  - {"type":"sleep","seconds":300}
- *  - {"type":"start"}
- *  - {"type":"stop"}
- *  - {"type":"settings","patch":{...}}
- *  - {"type":"session","id":"..."}
+ * Expected command types:
+ *  - {"type":"startSampling", ...}
+ *  - {"type":"stopSampling"}
+ *  - {"type":"keepSampling"}
+ *  - {"type":"hibernate", "sleepSeconds":...}
+ *  - {"type":"getConfig"}
  */
 void Orchestrator::handleServerCommand(const char* topic, const char* json)
 {
+  (void)topic;
   protocol::Command cmd;
   if (!protocol::decodeCommand(json, cmd)) {
     LOGW(TAG, "Bad JSON");
@@ -192,14 +194,14 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
 
   if (cmd.type == protocol::Command::Type::startSampling) {
     // Optional overrides
-    StaticJsonDocument<256> patch;
+    JsonDocument patch;
 
-    if (cmd.hasSamplePeriodMs) {
-      uint32_t v = cmd.samplePeriodMs;
+    if (cmd.hasSamplingInterval) {
+      uint32_t v = cmd.samplingInterval;
       if (v < MIN_SAMPLE_PERIOD_MS) {
         v = MIN_SAMPLE_PERIOD_MS;
       }
-      patch["samplePeriodMs"] = v;
+      patch["samplingInterval"] = v;
     }
 
     if (cmd.hasAggPeriodS) {
@@ -227,12 +229,7 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
     return;
   }
 
-  if (cmd.type == protocol::Command::Type::oneShotSample) {
-    _sensor.requestOneShot();
-    return;
-  }
-
-  if (cmd.type == protocol::Command::Type::showConfig) {
+  if (cmd.type == protocol::Command::Type::getConfig) {
     // Ask comms layer to publish a (possibly chunked) config snapshot.
     _commsEgress.publishConfig();
     return;
@@ -269,12 +266,6 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
     return;
   }
 
-  // Config is accepted only on cfg topic
-  if (strstr(topic, "/cfg") != nullptr) {
-    _commsEgress.applySettingsJson(json);
-    return;
-  }
-
   LOGW(TAG, "Unknown command");
 }
 
@@ -284,7 +275,7 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
 void Orchestrator::handleAck()
 {
   _lastAckMs = timeutil::nowMs();
-  _unackedPkts = 0;
+  _unackedAggregateCount = 0;
 }
 
 /**
@@ -340,11 +331,17 @@ void Orchestrator::checkTimeouts()
     return;
   }
 
-  // Sampling keep-alive ack (existing).
+  // Sampling keep-alive: go back to aware after max unacked aggregates.
   if (_state == State::Sampling) {
-    const uint32_t ackTimeoutMs = 30000u;
-    if (_lastAckMs != 0 && (now - _lastAckMs) > ackTimeoutMs) {
-      LOGW(TAG, "Ack timeout -> back to aware");
+    uint32_t limit = s.max_unacked_packets;
+    if (limit == 0u) {
+      limit = 1u;
+    }
+    if (_unackedAggregateCount >= limit) {
+      LOGW(TAG,
+           "Unacked limit reached (%lu/%lu) -> back to aware",
+           (unsigned long)_unackedAggregateCount,
+           (unsigned long)limit);
       enterState(State::Aware);
     }
   }
@@ -370,7 +367,7 @@ void Orchestrator::run()
 
     // If MQTT never comes up within timeout, conserve power.
     // Request hibernate only once; stay alive but quiet until PowerManager completes the transition.
-    if (!_noNetworkHibernateRequested && _state != State::Hibernating && !_commsReady && _mqttUpMs == 0 &&
+    if (!_noNetworkHibernateRequested && _state != State::Hibernating && _mqttUpMs == 0 &&
         (nowMs - bootMs) > HASTIG_MQTT_CONNECT_TIMEOUT_MS) {
       _noNetworkHibernateRequested = true;
       LOGW(TAG, "No network/MQTT within timeout. Hibernating for %lu s", (unsigned long)HASTIG_NO_NETWORK_HIBERNATE_S);
@@ -378,15 +375,6 @@ void Orchestrator::run()
       _forcedHibernateS = (uint32_t)HASTIG_NO_NETWORK_HIBERNATE_S;
       _powerManager.requestSleep(RestartReasonCode::NoNetwork, (uint32_t)HASTIG_NO_NETWORK_HIBERNATE_S);
       enterState(State::Hibernating);
-    }
-
-    // Comms readiness gate: after MQTT up + grace period.
-    if (!_commsReady && _mqttUpMs != 0 && (nowMs - _mqttUpMs) > HASTIG_COMMS_READY_GRACE_MS) {
-      _commsReady = true;
-      LOGI(TAG, "Comms ready gate passed");
-      if (_state == State::BootWaitComms) {
-        enterState(State::Aware);
-      }
     }
 
     // Unified event stream (UI + Comms)
@@ -425,7 +413,6 @@ void Orchestrator::run()
             LOGW(TAG, "NetDown");
             _lastActivityMs = nowMs;
             _mqttUpMs = 0;
-            _commsReady = false;
             break;
 
           case CommsEventType::MqttUp:
@@ -438,7 +425,13 @@ void Orchestrator::run()
             LOGW(TAG, "MqttDown");
             _lastActivityMs = nowMs;
             _mqttUpMs = 0;
-            _commsReady = false;
+            break;
+
+          case CommsEventType::AggregatePublishAttempted:
+            _lastActivityMs = nowMs;
+            if (_state == State::Sampling) {
+              _unackedAggregateCount++;
+            }
             break;
 
           case CommsEventType::ServerCommand:
@@ -448,7 +441,6 @@ void Orchestrator::run()
 
           case CommsEventType::PublishFailed:
             _lastActivityMs = nowMs;
-            _unackedPkts++;
             break;
 
           default:

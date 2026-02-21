@@ -14,7 +14,6 @@
  */
 struct SystemMailboxes {
   rtos::Mail<SensorSampleMsg, QUEUE_DEPTH_SENSOR_TO_AGG> sensorToAggMail;
-  rtos::Mail<SensorSampleMsg, QUEUE_DEPTH_ONE_SHOT>      oneShotMail;
   rtos::Mail<AggregateMsg, QUEUE_DEPTH_AGG_TO_COMMS>     aggToCommsMail;
 
   rtos::Mail<UiEventMsg, QUEUE_DEPTH_UI_TO_ORCH>        uiToOrchMail;

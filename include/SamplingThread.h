@@ -13,16 +13,12 @@
 template <uint32_t DEPTH>
 using SensorMail = rtos::Mail<SensorSampleMsg, DEPTH>;
 
-template <uint32_t DEPTH>
-using OneShotMail = rtos::Mail<SensorSampleMsg, DEPTH>;
-
 /**
  * @brief Sensor sampling thread.
  */
 class SamplingThread {
 public:
   SamplingThread(SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& outMail,
-             OneShotMail<QUEUE_DEPTH_ONE_SHOT>& oneShotMail,
              SettingsManager& settings,
              SessionClock& clock,
              EventBus& eventBus);
@@ -38,11 +34,8 @@ public:
    */
   void setEnabled(bool en);
 
-  void requestOneShot();
-
 private:
   SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& _outMail;
-  OneShotMail<QUEUE_DEPTH_ONE_SHOT>&      _oneShotMail;
   SettingsManager&                         _settings;
   SessionClock&                          _clock;
   EventBus&                              _eventBus;
@@ -51,7 +44,6 @@ private:
   rtos::EventFlags _flags;
 
   static constexpr uint32_t FLAG_WAKE = 1u << 0;
-  static constexpr uint32_t FLAG_ONE_SHOT = 1u << 1;
 
   std::atomic<bool> _enabled{false};
 

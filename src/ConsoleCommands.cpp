@@ -50,7 +50,7 @@ void printSettingsToSerial(const SettingsManager& settingsManager, Stream& out)
   printKvU32(out, "sensorType", s.sensor_type);
 
   // Sampling / aggregation
-  printKvU32(out, "samplePeriodMs", s.sample_period_ms);
+  printKvU32(out, "samplingInterval", s.sample_period_ms);
   printKvU32(out, "aggPeriodS", s.agg_period_s);
 
   // Power / behaviour

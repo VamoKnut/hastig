@@ -3,7 +3,6 @@
 #include <ArduinoJson.h>
 #include <stdio.h>
 #include <string.h>
-#include <string.h>
 
 namespace protocol {
 
@@ -22,11 +21,8 @@ static Command::Type decodeType(const char* type)
   if (strcmp(type, kCmdStopSampling) == 0) {
     return Command::Type::stopSampling;
   }
-  if (strcmp(type, kCmdOneShotSample) == 0) {
-    return Command::Type::oneShotSample;
-  }
-  if (strcmp(type, kCmdShowConfig) == 0 || strcmp(type, kCmdShowSettings) == 0) {
-    return Command::Type::showConfig;
+  if (strcmp(type, kCmdGetConfig) == 0) {
+    return Command::Type::getConfig;
   }
   if (strcmp(type, kCmdHibernate) == 0) {
     return Command::Type::hibernate;
@@ -48,7 +44,7 @@ bool decodeCommand(const char* json, Command& out)
 {
   out = Command{};
 
-  StaticJsonDocument<384> doc;
+  JsonDocument doc;
   const auto err = deserializeJson(doc, json);
   if (err) {
     return false;
@@ -62,9 +58,9 @@ bool decodeCommand(const char* json, Command& out)
     out.sleepSeconds = doc[kKeySleepSeconds].as<uint32_t>();
   }
 
-  if (doc[kKeySamplePeriodMs].is<uint32_t>()) {
-    out.hasSamplePeriodMs = true;
-    out.samplePeriodMs = doc[kKeySamplePeriodMs].as<uint32_t>();
+  if (doc[kKeySamplingInterval].is<uint32_t>()) {
+    out.hasSamplingInterval = true;
+    out.samplingInterval = doc[kKeySamplingInterval].as<uint32_t>();
   }
 
   if (doc[kKeyAggPeriodS].is<uint32_t>()) {
@@ -126,7 +122,7 @@ bool encodeHibernatingExtra(const char* reason, uint32_t expectedDurationS, char
     return false;
   }
 
-  StaticJsonDocument<128> doc;
+  JsonDocument doc;
   doc[kKeyReason] = (reason != nullptr) ? reason : "";
   doc[kKeyExpectedDuration] = expectedDurationS;
 

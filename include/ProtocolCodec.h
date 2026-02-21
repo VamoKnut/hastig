@@ -12,9 +12,7 @@ static constexpr const char* kKeyType = "type";
 static constexpr const char* kCmdKeepSampling = "keepSampling";
 static constexpr const char* kCmdStartSampling = "startSampling";
 static constexpr const char* kCmdStopSampling = "stopSampling";
-static constexpr const char* kCmdOneShotSample = "oneShotSample";
-static constexpr const char* kCmdShowConfig = "showConfig";
-static constexpr const char* kCmdShowSettings = "showSettings";
+static constexpr const char* kCmdGetConfig = "getConfig";
 static constexpr const char* kCmdHibernate = "hibernate";
 static constexpr const char* kCmdNudge = "nudge";
 static constexpr const char* kCmdResetBatteryStatistics = "resetBatteryStatistics";
@@ -22,7 +20,7 @@ static constexpr const char* kCmdFactoryReset = "factoryReset";
 
 // Optional command fields
 static constexpr const char* kKeySleepSeconds = "sleepSeconds";
-static constexpr const char* kKeySamplePeriodMs = "samplePeriodMs";
+static constexpr const char* kKeySamplingInterval = "samplingInterval";
 static constexpr const char* kKeyAggPeriodS = "aggPeriodS";
 static constexpr const char* kKeySessionId = "sessionID";
 
@@ -41,8 +39,7 @@ struct Command
     keepSampling,
     startSampling,
     stopSampling,
-    oneShotSample,
-    showConfig,
+    getConfig,
     hibernate,
     nudge,
     resetBatteryStatistics,
@@ -55,8 +52,8 @@ struct Command
   bool hasSleepSeconds = false;
   uint32_t sleepSeconds = 0;
 
-  bool hasSamplePeriodMs = false;
-  uint32_t samplePeriodMs = 0;
+  bool hasSamplingInterval = false;
+  uint32_t samplingInterval = 0;
 
   bool hasAggPeriodS = false;
   uint32_t aggPeriodS = 0;

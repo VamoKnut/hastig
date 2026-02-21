@@ -17,7 +17,7 @@ EventBus::EventBus(rtos::Mail<UiEventMsg, QUEUE_DEPTH_UI_TO_ORCH>& uiToOrchMail,
 
 bool EventBus::publish(const CommsEventMsg& evt)
 {
-  CommsEventMsg* m = _commsToOrchMail.alloc(0);
+  CommsEventMsg* m = _commsToOrchMail.try_alloc();
   if (m == nullptr) {
     LOGW(TAG, "publish: commsToOrchMail alloc failed");
     return false;
@@ -36,7 +36,7 @@ bool EventBus::publish(const CommsEventMsg& evt)
 
 bool EventBus::publishUi(const UiEventMsg& evt)
 {
-  UiEventMsg* m = _uiToOrchMail.alloc(0);
+  UiEventMsg* m = _uiToOrchMail.try_alloc();
   if (m == nullptr) {
     LOGW(TAG, "publishUi: uiToOrchMail alloc failed");
     return false;
@@ -55,7 +55,7 @@ bool EventBus::publishUi(const UiEventMsg& evt)
 
 bool EventBus::publishWorker(const WorkerEventMsg& evt)
 {
-  WorkerEventMsg* m = _workerToOrchMail.alloc(0);
+  WorkerEventMsg* m = _workerToOrchMail.try_alloc();
   if (m == nullptr) {
     LOGW(TAG, "publishWorker: workerToOrchMail alloc failed");
     return false;

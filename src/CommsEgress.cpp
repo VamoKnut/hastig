@@ -38,7 +38,7 @@ bool CommsEgress::sendAggregate(const AggregateMsg& msg)
 
 bool CommsEgress::publishModeChange(const char* mode, const char* previousMode)
 {
-  StaticJsonDocument<192> st;
+  JsonDocument st;
   st["type"]         = "modeChange";
   st["previousMode"] = previousMode;
 
@@ -49,7 +49,7 @@ bool CommsEgress::publishModeChange(const char* mode, const char* previousMode)
   char out[256];
   serializeJson(st, out, sizeof(out));
 
-  if (mode != nullptr && strcmp(mode, "hibernate") == 0) {
+  if (mode != nullptr && strcmp(mode, "hibernating") == 0) {
     return sendOrchCommand(_commandBus, OrchCommandType::PublishHibernating, out);
   }
   return sendOrchCommand(_commandBus, OrchCommandType::PublishAwake, out);
@@ -84,11 +84,6 @@ bool CommsEgress::publishLowBatteryAlert(const BoardHal::BatterySnapshot& bs, co
   return publishAwakeJson(out);
 }
 
-bool CommsEgress::connect()
-{
-  return sendOrchCommand(_commandBus, OrchCommandType::Connect, nullptr);
-}
-
 bool CommsEgress::publishAwake()
 {
   return sendOrchCommand(_commandBus, OrchCommandType::PublishAwake, nullptr);
@@ -97,11 +92,6 @@ bool CommsEgress::publishAwake()
 bool CommsEgress::publishAwakeJson(const char* json)
 {
   return sendOrchCommand(_commandBus, OrchCommandType::PublishAwake, json);
-}
-
-bool CommsEgress::startSamplingSession()
-{
-  return sendOrchCommand(_commandBus, OrchCommandType::StartSamplingSession, nullptr);
 }
 
 bool CommsEgress::publishConfig()
@@ -128,9 +118,9 @@ bool CommsEgress::publishHibernatingJson(const char* json)
 
 bool CommsEgress::publishHibernateModeChange(const char* previousMode, const char* reasonStr, uint32_t expectedDurationS)
 {
-  StaticJsonDocument<224> st;
+  JsonDocument st;
   st["type"]             = "modeChange";
-  st["mode"]             = "hibernate";
+  st["mode"]             = "hibernating";
   st["previousMode"]     = previousMode;
   st["reason"]           = reasonStr;
   st["expectedDuration"] = expectedDurationS;
@@ -139,4 +129,3 @@ bool CommsEgress::publishHibernateModeChange(const char* previousMode, const cha
   serializeJson(st, out, sizeof(out));
   return publishHibernatingJson(out);
 }
-

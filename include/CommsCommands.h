@@ -10,14 +10,9 @@
  */
 
 enum class OrchCommandType : uint8_t {
-  Connect,
-  Disconnect,
-  PrepareHibernate,
   PublishAwake,
   PublishHibernating,
   ApplySettingsJson,
-  StartSamplingSession,
-  StopSamplingSession,
   PublishConfig,
 };
 

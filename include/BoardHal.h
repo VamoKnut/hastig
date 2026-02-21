@@ -26,7 +26,7 @@ public:
   static bool popButton(Button& outButton);
 
   /**
-   * @brief Wait for a button edge to occur (IRQ-based). Returns true if any event occurred.
+   * @brief Wait for a button press event to occur (IRQ-based). Returns true if any event occurred.
    */
   static bool waitForButtonEvent(uint32_t timeoutMs);
 
@@ -52,6 +52,7 @@ public:
   static BatterySnapshot readBattery(Battery& battery);
   static void resetBatteryStatistics(Battery& battery);
   static void configurePmicFromSettings(const SettingsManager& settingsManager, Battery& battery, Charger& charger);
+  static void getHardwareId(char* out, size_t outSize);
 
   /**
    * Detect factory reset combo at boot (hold UP+DOWN for holdMs).
@@ -60,7 +61,7 @@ public:
   static bool detectFactoryResetButtonCombo(uint32_t windowMs = 3500u, uint32_t holdMs = 3000u);
 
   /**
-   * Prepare for IRQ-based button detection (enabled late in setup()).
+   * Prepare for IRQ-based button press detection (active-low FALLING edge).
    * Does not change existing polling-based behavior.
    */
   static void enableButtonIrq();

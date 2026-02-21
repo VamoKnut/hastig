@@ -8,8 +8,6 @@
 #include "CommsInbox.h"
 #include "CommsCommands.h"
 #include "Messages.h"
-#include "SamplingThread.h"
-#include "SessionClock.h"
 #include "SettingsManager.h"
 #include "EventBus.h"
 
@@ -27,16 +25,13 @@ using OrchToCommsMail = rtos::Mail<OrchCommandMsg, DEPTH>;
  * Some GSM.h / GSMClient integrations behave reliably only when called from the
  * Arduino "main" context (setup/loop), not from a preempted RTOS thread.
  *
- * This class keeps the same mailbox wiring as CommsThread, but is executed by
- * main loop() via loopOnce().
+ * This class owns comms processing and is executed by main loop() via loopOnce().
  */
 class CommsPump {
 public:
   CommsPump(CommsInbox& inbox,
-            OneShotMail<QUEUE_DEPTH_ONE_SHOT>& oneShotMail,
             EventBus& eventBus,
-            SettingsManager& settings,
-            SessionClock& clock);
+            SettingsManager& settings);
 
   /**
    * @brief Initialize the pump (call from setup()).
@@ -66,11 +61,9 @@ public:
   void prepareHibernate();
 
 private:
-  CommsInbox&                         _inbox;
-  OneShotMail<QUEUE_DEPTH_ONE_SHOT>&  _oneShotMail;
-  EventBus&                                    _eventBus;
-  SettingsManager&                              _settings;
-  SessionClock&                               _clock;
+  CommsInbox&       _inbox;
+  EventBus&         _eventBus;
+  SettingsManager&  _settings;
 
   bool _wantConnected = true;
   bool _hibernatePending = false;
@@ -102,8 +95,9 @@ private:
 
   bool publishStatus(const char* mode, const char* extraJsonKVsOrNull);
   bool publishConfigSnapshot();
+  bool publishConfigChunk(uint8_t chunk, uint8_t total, const char* section,
+                          SettingsManager::ConfigSection configSection);
   bool publishAggregate(const AggregateMsg& a);
-  bool publishOneShot(const SensorSampleMsg& s);
 
   bool publishJson(const char* topic, const JsonDocument& doc);
 

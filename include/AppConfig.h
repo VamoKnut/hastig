@@ -38,7 +38,6 @@ static constexpr uint32_t STACK_UI    = 6 * 1024;
 
 // ---------------- Mail queue depths ----------------
 static constexpr uint32_t QUEUE_DEPTH_SENSOR_TO_AGG = 32;
-static constexpr uint32_t QUEUE_DEPTH_ONE_SHOT      = 8;
 static constexpr uint32_t QUEUE_DEPTH_AGG_TO_COMMS  = 16;
 
 static constexpr uint32_t QUEUE_DEPTH_UI_TO_ORCH      = 16;
@@ -52,25 +51,9 @@ static constexpr const char* MQTT_TOPIC_POSTFIX_CMD = "cmd";
 static constexpr const char* MQTT_TOPIC_POSTFIX_CFG = "cfg";
 static constexpr uint32_t MIN_SAMPLE_PERIOD_MS = 200;
 
-// ---------------- Seametrics A/B toggles ----------------
-// Keep these as controlled diagnostics while narrowing the MQTT stall root cause.
-// Step A (current): DE toggle ON, IRQ masking OFF.
-#ifndef HASTIG_SEAMETRICS_DE_TOGGLE
-#define HASTIG_SEAMETRICS_DE_TOGGLE 1
-#endif
-
-#ifndef HASTIG_SEAMETRICS_SOFTUART_IRQ_MASK
-#define HASTIG_SEAMETRICS_SOFTUART_IRQ_MASK 0
-#endif
-
-
 // Grace time after publishing final status before hibernate.
 static constexpr uint32_t HIBERNATE_STATUS_GRACE_MS = 1500;
 // Comms boot gating
-#define HASTIG_COMMS_READY_GRACE_MS 30000UL
-#define HASTIG_MQTT_CONNECT_TIMEOUT_MS 120000UL
-#define HASTIG_NO_NETWORK_HIBERNATE_S 900UL
-
-// Keyboard pins (active-low)
-#define PIN_KEY_UP   D0
-#define PIN_KEY_DN   D1
+static constexpr uint32_t HASTIG_COMMS_READY_GRACE_MS = 30000UL;
+static constexpr uint32_t HASTIG_MQTT_CONNECT_TIMEOUT_MS = 120000UL;
+static constexpr uint32_t HASTIG_NO_NETWORK_HIBERNATE_S = 900UL;

@@ -13,10 +13,8 @@ using namespace std::chrono;
 static const char* TAG = "SENS";
 
 SamplingThread::SamplingThread(SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& outMail,
-                               OneShotMail<QUEUE_DEPTH_ONE_SHOT>&     oneShotMail,
                                SettingsManager& settings, SessionClock& clock, EventBus& eventBus)
     : _outMail(outMail),
-      _oneShotMail(oneShotMail),
       _settings(settings),
       _clock(clock),
       _eventBus(eventBus),
@@ -47,14 +45,6 @@ void SamplingThread::setEnabled(bool en)
    _flags.set(FLAG_WAKE);
 }
 
-/**
- * @brief Request a one-shot sample.
- */
-void SamplingThread::requestOneShot()
-{
-   _flags.set(FLAG_ONE_SHOT);
-}
-
 void SamplingThread::threadEntry(void* ctx)
 {
    static_cast<SamplingThread*>(ctx)->run();
@@ -69,15 +59,10 @@ void SamplingThread::run()
 
    while (true)
    {
-      _flags.wait_any(FLAG_WAKE | FLAG_ONE_SHOT);
+      _flags.wait_any(FLAG_WAKE);
+      _flags.clear(FLAG_WAKE);
 
-      bool oneShot = (_flags.get() & FLAG_ONE_SHOT) != 0u;
-      if (oneShot)
-      {
-         _flags.clear(FLAG_ONE_SHOT);
-      }
-
-      if (!_enabled.load() && !oneShot)
+      if (!_enabled.load())
       {
          continue;
       }
@@ -119,7 +104,7 @@ void SamplingThread::run()
          periodMs = MIN_SAMPLE_PERIOD_MS;
       }
 
-      while (_enabled.load() || oneShot)
+      while (_enabled.load())
       {
          SensorSampleMsg tmp;
          memset(&tmp, 0, sizeof(tmp));
@@ -128,18 +113,11 @@ void SamplingThread::run()
          tmp.ok        = ok;
          if (tmp.ok)
          {
-            SensorSampleMsg* m = oneShot ? _oneShotMail.try_alloc() : _outMail.try_alloc();
+            SensorSampleMsg* m = _outMail.try_alloc();
             if (m != nullptr)
             {
                memcpy(m, &tmp, sizeof(*m));
-               if (oneShot)
-               {
-                  _oneShotMail.put(m);
-               }
-               else
-               {
-                  _outMail.put(m);
-               }
+               _outMail.put(m);
                LOGD(TAG, "Produced sample t=%lu %s=%.2f %s=%.2f ok=%d", (unsigned long)m->relMs, m->k0,
                     (double)m->v0, m->k1, (double)m->v1, m->ok ? 1 : 0);
 
@@ -164,11 +142,6 @@ void SamplingThread::run()
 
          // Always yield here so main loop and comms get scheduling opportunities.
          rtos::ThisThread::sleep_for(milliseconds(1));
-
-         if (oneShot)
-         {
-            break;
-         }
 
          rtos::ThisThread::sleep_for(milliseconds(periodMs));
       }

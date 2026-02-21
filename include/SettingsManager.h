@@ -109,6 +109,7 @@ private:
 
   bool loadFromFlash();
   void setDefaults();
+  void clampRuntimeSettingsUnlocked();
 
   static uint32_t crc32(const uint8_t* data, size_t len);
 };

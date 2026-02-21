@@ -73,6 +73,7 @@ enum class CommsEventType : uint8_t {
   NetDown,
   MqttUp,
   MqttDown,
+  AggregatePublishAttempted,
   ServerCommand,
   PublishFailed,
 };

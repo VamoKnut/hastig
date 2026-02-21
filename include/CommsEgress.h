@@ -21,13 +21,11 @@ public:
   bool sendAggregate(const AggregateMsg& msg);
 
   // Higher-level helpers: keep callers decoupled from OrchCommandType.
-  bool connect();
   bool publishAwake();
   bool publishAwakeJson(const char* json);
   bool publishModeChange(const char* mode, const char* previousMode);
   bool publishStatus(const BoardHal::BatterySnapshot& bs, const char* mode);
   bool publishLowBatteryAlert(const BoardHal::BatterySnapshot& bs, const char* mode);
-  bool startSamplingSession();
   bool publishConfig();
   bool applySettingsJson(const char* json);
 

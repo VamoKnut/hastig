@@ -1,5 +1,5 @@
 #include "CommsPump.h"
-#include "DeviceIdentity.h"
+#include "BoardHal.h"
 #include "ProtocolCodec.h"
 #include "Logger.h"
 #include "TimeUtil.h"
@@ -16,6 +16,8 @@
 using namespace std::chrono;
 
 static const char* TAG = "COMMS";
+static constexpr size_t MAX_CONFIG_PAYLOAD_BYTES = 320;
+static constexpr uint8_t CONFIG_CHUNK_TOTAL = 5;
 
 CommsPump* CommsPump::_self = nullptr;
 
@@ -28,15 +30,11 @@ static PubSubClient mqtt(gsmClient);
  * @brief Construct pump.
  */
 CommsPump::CommsPump(CommsInbox& inbox,
-                     OneShotMail<QUEUE_DEPTH_ONE_SHOT>& oneShotMail,
                      EventBus& eventBus,
-                     SettingsManager& settings,
-                     SessionClock& clock)
+                     SettingsManager& settings)
     : _inbox(inbox),
-      _oneShotMail(oneShotMail),
       _eventBus(eventBus),
-      _settings(settings),
-      _clock(clock)
+      _settings(settings)
 {
   _self = this;
 }
@@ -82,26 +80,22 @@ void CommsPump::postEvent(CommsEventType type, const char* topic, const char* pa
  */
 void CommsPump::handleOrchCommand(const OrchCommandMsg& cmd)
 {
-  if (cmd.type == OrchCommandType::Connect) {
-    _wantConnected = true;
-    _hibernatePending = false;
-  } else if (cmd.type == OrchCommandType::Disconnect) {
-    _wantConnected = false;
-    _hibernatePending = false;
-    teardownLinks(true);
-  } else if (cmd.type == OrchCommandType::PrepareHibernate) {
-    _wantConnected = false;
-    _hibernatePending = true;
-    teardownLinks(false);
-  } else if (cmd.type == OrchCommandType::PublishAwake) {
-    (void)publishStatus("aware", cmd.payload[0] ? cmd.payload : nullptr);
-  } else if (cmd.type == OrchCommandType::PublishHibernating) {
-    (void)publishStatus("hibernate", cmd.payload[0] ? cmd.payload : nullptr);
-  } else if (cmd.type == OrchCommandType::PublishConfig) {
-    (void)publishConfigSnapshot();
-  } else if (cmd.type == OrchCommandType::ApplySettingsJson) {
-    _settings.applyJson(cmd.payload, true);
-    _topicCmd[0] = '\0';
+  switch (cmd.type) {
+    case OrchCommandType::PublishAwake:
+      (void)publishStatus("aware", cmd.payload[0] ? cmd.payload : nullptr);
+      break;
+    case OrchCommandType::PublishHibernating:
+      (void)publishStatus("hibernating", cmd.payload[0] ? cmd.payload : nullptr);
+      break;
+    case OrchCommandType::PublishConfig:
+      (void)publishConfigSnapshot();
+      break;
+    case OrchCommandType::ApplySettingsJson:
+      _settings.applyJson(cmd.payload, true);
+      _topicCmd[0] = '\0';
+      break;
+    default:
+      break;
   }
 }
 
@@ -216,7 +210,7 @@ bool CommsPump::ensureMqtt()
     const char* node = s.device_name;
     char        hwId[32];
     if (node[0] == '\0') {
-      DeviceIdentity::getHardwareId(hwId, sizeof(hwId));
+      BoardHal::getHardwareId(hwId, sizeof(hwId));
       node = hwId;
     }
 
@@ -324,7 +318,7 @@ bool CommsPump::publishStatus(const char* mode, const char* extraJsonKVsOrNull)
   doc["type"] = "status";
   doc["tsMs"] = (uint32_t)millis();
   doc["mode"] = mode;
-if (extraJsonKVsOrNull != nullptr && extraJsonKVsOrNull[0] != '\0') {
+  if (extraJsonKVsOrNull != nullptr && extraJsonKVsOrNull[0] != '\0') {
     JsonDocument extra;
     if (deserializeJson(extra, extraJsonKVsOrNull) == DeserializationError::Ok && extra.is<JsonObject>()) {
       for (JsonPair kv : extra.as<JsonObject>()) {
@@ -343,14 +337,9 @@ bool CommsPump::publishConfigSnapshot()
     return false;
   }
 
-
-  // PubSubClient buffer size is 512 bytes, but it includes topic/header overhead.
-  // To stay safely within the limit, keep payloads well below 512.
-  static constexpr size_t MAX_CONFIG_PAYLOAD_BYTES = 320;
-
   // Try single-message first (backward compatible).
   {
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     doc["type"] = "config";
     doc["tsMs"] = (uint32_t)millis();
     _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::All);
@@ -363,56 +352,39 @@ bool CommsPump::publishConfigSnapshot()
     LOGW(TAG, "Config snapshot too large (%u bytes). Publishing as chunks.", (unsigned)bytes);
   }
 
-  // Chunked publish. Categories keep chunks stable and easy to read.
-  // Each chunk is published on the status topic.
-  const uint8_t total = 5;
-
-  const auto publishChunk = [&](uint8_t chunk, const char* section, auto fill) -> bool {
-    StaticJsonDocument<384> doc;
-    doc["type"] = "configChunk";
-    doc["tsMs"] = (uint32_t)millis();
-    doc["chunk"] = chunk;
-    doc["total"] = total;
-    doc["section"] = section;
-
-    fill(doc);
-
-    const size_t bytes = measureJson(doc);
-    if (bytes > MAX_CONFIG_PAYLOAD_BYTES) {
-      LOGW(TAG, "Config chunk %u/%u (%s) is %u bytes (limit %u).",
-           (unsigned)chunk,
-           (unsigned)total,
-           section,
-           (unsigned)bytes,
-           (unsigned)MAX_CONFIG_PAYLOAD_BYTES);
-    }
-
-    return publishJson(_topicStatus, doc);
-  };
-
   bool ok = true;
-
-  ok = ok && publishChunk(1, "network", [&](auto& doc) {
-    _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::Network);
-  });
-
-  ok = ok && publishChunk(2, "mqtt", [&](auto& doc) {
-    _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::Mqtt);
-  });
-
-  ok = ok && publishChunk(3, "device", [&](auto& doc) {
-    _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::Device);
-  });
-
-  ok = ok && publishChunk(4, "schedule", [&](auto& doc) {
-    _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::Schedule);
-  });
-
-  ok = ok && publishChunk(5, "power", [&](auto& doc) {
-    _settings.addMaskedConfigFields(doc, SettingsManager::ConfigSection::Power);
-  });
+  ok = ok && publishConfigChunk(1, CONFIG_CHUNK_TOTAL, "network", SettingsManager::ConfigSection::Network);
+  ok = ok && publishConfigChunk(2, CONFIG_CHUNK_TOTAL, "mqtt", SettingsManager::ConfigSection::Mqtt);
+  ok = ok && publishConfigChunk(3, CONFIG_CHUNK_TOTAL, "device", SettingsManager::ConfigSection::Device);
+  ok = ok && publishConfigChunk(4, CONFIG_CHUNK_TOTAL, "schedule", SettingsManager::ConfigSection::Schedule);
+  ok = ok && publishConfigChunk(5, CONFIG_CHUNK_TOTAL, "power", SettingsManager::ConfigSection::Power);
 
   return ok;
+}
+
+bool CommsPump::publishConfigChunk(uint8_t chunk, uint8_t total, const char* section,
+                                   SettingsManager::ConfigSection configSection)
+{
+  JsonDocument doc;
+  doc["type"] = "configChunk";
+  doc["tsMs"] = (uint32_t)millis();
+  doc["chunk"] = chunk;
+  doc["total"] = total;
+  doc["section"] = section;
+  _settings.addMaskedConfigFields(doc, configSection);
+
+  const size_t bytes = measureJson(doc);
+  if (bytes > MAX_CONFIG_PAYLOAD_BYTES) {
+    LOGW(TAG,
+         "Config chunk %u/%u (%s) is %u bytes (limit %u).",
+         (unsigned)chunk,
+         (unsigned)total,
+         section,
+         (unsigned)bytes,
+         (unsigned)MAX_CONFIG_PAYLOAD_BYTES);
+  }
+
+  return publishJson(_topicStatus, doc);
 }
 
 
@@ -421,7 +393,7 @@ bool CommsPump::publishConfigSnapshot()
  */
 bool CommsPump::publishAggregate(const AggregateMsg& a)
 {
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   doc["type"] = "data";
   doc["t0"] = a.rel_start_ms;
   doc["t1"] = a.rel_end_ms;
@@ -533,6 +505,7 @@ void CommsPump::loopOnce()
       break;
     }
     (void)publishAggregate(*a);
+    postEvent(CommsEventType::AggregatePublishAttempted, "data", "aggregate_publish_attempted");
     _inbox.freeAggregate(a);
     publishedThisLoop++;
 
@@ -601,23 +574,4 @@ bool CommsPump::publishJson(const char* topic, const JsonDocument& doc)
     }
   }
   return ok;
-}
-
-
-
-bool CommsPump::publishOneShot(const SensorSampleMsg& s)
-{
-  StaticJsonDocument<256> doc;
-  doc["type"] = "oneShotSampleResult";
-  doc["t"] = s.relMs;
-  doc["ok"] = s.ok ? 1 : 0;
-
-  doc[s.k0] = roundf(s.v0 * 100.0f) / 100.0f;
-  if (s.k1[0] != '\0') {
-    const bool isTemp = (strcmp(s.k1, "temp") == 0);
-    const float mul   = isTemp ? 10.0f : 100.0f;
-    doc[s.k1] = roundf(s.v1 * mul) / mul;
-  }
-
-  return publishJson(_topicData, doc);
 }

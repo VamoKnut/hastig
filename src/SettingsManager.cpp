@@ -6,9 +6,15 @@
 #include <platform/ScopedLock.h>
 #include <mbed.h>
 #include <string.h>
-#include <platform/ScopedLock.h>
 
 static const char* TAG = "SET";
+static constexpr uint32_t kMinAwareTimeoutS   = 60u;
+static constexpr uint32_t kDefaultAwareTimeoutS = 600u;
+static constexpr uint32_t kMinDefaultSleepS   = 60u;
+static constexpr uint32_t kDefaultSleepS      = 3600u;
+static constexpr uint32_t kMinStatusIntervalS = 30u;
+static constexpr uint32_t kDefaultStatusIntervalS = 120u;
+static constexpr uint32_t kMaxSleepDurationS  = 43200u;
 
 struct StoredBlob {
   uint32_t    magic;
@@ -46,17 +52,8 @@ void SettingsManager::begin()
     (void)save();
   }
 
-  
-  // Sanity-clamp settings (also helps when upgrading from older stored configs).
-  if (_s.aware_timeout_s < 60u) {
-    _s.aware_timeout_s = 600u;
-  }
-  // Project default: keep status cadence stable for backend consumption.
-  _s.status_interval_s = 120u;
-  if (_s.default_sleep_s < 60u) {
-    _s.default_sleep_s = 3600u;
-  }
-LOGI(TAG,
+  clampRuntimeSettingsUnlocked();
+  LOGI(TAG,
        "Settings loaded: apn=%s mqtt=%s:%u sample_ms=%lu agg_s=%lu",
        _s.apn,
        _s.mqtt_host,
@@ -105,11 +102,8 @@ bool SettingsManager::applyJson(const char* json, bool persist)
     _s.sensor_type = doc["sensorType"].as<uint32_t>();
   }
 
-  if (doc["samplePeriodMs"].is<uint32_t>()) {
-    _s.sample_period_ms = doc["samplePeriodMs"].as<uint32_t>();
-    if (_s.sample_period_ms < MIN_SAMPLE_PERIOD_MS) {
-      _s.sample_period_ms = MIN_SAMPLE_PERIOD_MS;
-    }
+  if (doc["samplingInterval"].is<uint32_t>()) {
+    _s.sample_period_ms = doc["samplingInterval"].as<uint32_t>();
   }
   if (doc["aggPeriodS"].is<uint32_t>()) {
     _s.agg_period_s = doc["aggPeriodS"].as<uint32_t>();
@@ -190,6 +184,8 @@ bool SettingsManager::applyJson(const char* json, bool persist)
   if (doc["maxUnackedPackets"].is<uint32_t>()) {
     _s.max_unacked_packets = doc["maxUnackedPackets"].as<uint32_t>();
   }
+
+  clampRuntimeSettingsUnlocked();
 
   if (persist) {
     return save();
@@ -290,10 +286,38 @@ void SettingsManager::setDefaults()
   _s.device_name[sizeof(_s.device_name) - 1] = '\0';
 }
 
+void SettingsManager::clampRuntimeSettingsUnlocked()
+{
+  if (_s.sample_period_ms < MIN_SAMPLE_PERIOD_MS) {
+    _s.sample_period_ms = MIN_SAMPLE_PERIOD_MS;
+  }
+
+  if (_s.aware_timeout_s < kMinAwareTimeoutS) {
+    _s.aware_timeout_s = kDefaultAwareTimeoutS;
+  }
+  if (_s.default_sleep_s < kMinDefaultSleepS) {
+    _s.default_sleep_s = kDefaultSleepS;
+  }
+  if (_s.status_interval_s < kMinStatusIntervalS) {
+    _s.status_interval_s = kDefaultStatusIntervalS;
+  }
+
+  if (_s.sensor_addr == 0u || _s.sensor_addr > 247u) {
+    _s.sensor_addr = 1u;
+  }
+  if (_s.max_forced_sleep_s == 0u || _s.max_forced_sleep_s > kMaxSleepDurationS) {
+    _s.max_forced_sleep_s = kMaxSleepDurationS;
+  }
+  if (_s.emergency_sleep_s == 0u || _s.emergency_sleep_s > kMaxSleepDurationS) {
+    _s.emergency_sleep_s = kMaxSleepDurationS;
+  }
+}
+
 void SettingsManager::setRuntime(const AppSettings& s)
 {
   mbed::ScopedLock<rtos::Mutex> lock(_mx);
   _s = s;
+  clampRuntimeSettingsUnlocked();
 }
 
 /**
@@ -314,70 +338,46 @@ static const char* maskIfSet(const char* v)
 void SettingsManager::addMaskedConfigFields(JsonDocument& doc, ConfigSection section) const
 {
   const AppSettings s = getCopy();
+  const bool includeAll = (section == ConfigSection::All);
 
-  const auto addNetwork = [&]() {
+  if (includeAll || section == ConfigSection::Network) {
     doc["apn"]     = s.apn;
     doc["simPin"]  = maskIfSet(s.sim_pin);
     doc["apnUser"] = maskIfSet(s.apn_user);
     doc["apnPass"] = maskIfSet(s.apn_pass);
-  };
+  }
 
-  const auto addMqtt = [&]() {
+  if (includeAll || section == ConfigSection::Mqtt) {
     doc["mqttHost"]     = s.mqtt_host;
     doc["mqttPort"]     = s.mqtt_port;
     doc["mqttClientId"] = s.mqtt_client_id;
     doc["mqttUser"]     = maskIfSet(s.mqtt_user);
     doc["mqttPass"]     = maskIfSet(s.mqtt_pass);
-  };
+  }
 
-  const auto addDevice = [&]() {
+  if (includeAll || section == ConfigSection::Device) {
     doc["deviceName"]     = s.device_name;
     doc["sensorAddress"]  = s.sensor_addr;
     doc["sensorBaudrate"] = s.sensor_baud;
     doc["sensorWarmupMs"] = s.sensor_warmup_ms;
     doc["sensorType"]     = s.sensor_type;
-  };
+  }
 
-  const auto addSchedule = [&]() {
-    doc["samplePeriodMs"]  = s.sample_period_ms;
+  if (includeAll || section == ConfigSection::Schedule) {
+    doc["samplingInterval"] = s.sample_period_ms;
     doc["aggPeriodS"]      = s.agg_period_s;
     doc["awareTimeoutS"]   = s.aware_timeout_s;
     doc["defaultSleepS"]   = s.default_sleep_s;
     doc["statusIntervalS"] = s.status_interval_s;
-  };
+  }
 
-  const auto addPower = [&]() {
-    doc["lowBattMinV"]       = s.low_batt_min_v;
+  if (includeAll || section == ConfigSection::Power) {
+    doc["lowBattMinV"]        = s.low_batt_min_v;
     doc["maxChargingCurrent"] = s.max_charging_current;
     doc["maxChargingVoltage"] = s.max_charging_voltage;
-    doc["emergencyDelayS"]   = s.emergency_delay_s;
-    doc["emergencySleepS"]   = s.emergency_sleep_s;
-    doc["maxForcedSleepS"]   = s.max_forced_sleep_s;
-    doc["maxUnackedPackets"] = s.max_unacked_packets;
-  };
-
-  switch (section) {
-    case ConfigSection::All:
-      addNetwork();
-      addMqtt();
-      addDevice();
-      addSchedule();
-      addPower();
-      break;
-    case ConfigSection::Network:
-      addNetwork();
-      break;
-    case ConfigSection::Mqtt:
-      addMqtt();
-      break;
-    case ConfigSection::Device:
-      addDevice();
-      break;
-    case ConfigSection::Schedule:
-      addSchedule();
-      break;
-    case ConfigSection::Power:
-      addPower();
-      break;
+    doc["emergencyDelayS"]    = s.emergency_delay_s;
+    doc["emergencySleepS"]    = s.emergency_sleep_s;
+    doc["maxForcedSleepS"]    = s.max_forced_sleep_s;
+    doc["maxUnackedPackets"]  = s.max_unacked_packets;
   }
 }

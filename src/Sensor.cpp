@@ -45,7 +45,7 @@ class FakeSensor : public Sensor
    }
 };
 
-class SeaMetricsCT2X : public Sensor
+class SeametricsCT2X : public Sensor
 {
  public:
    const char* name() const override
@@ -71,11 +71,7 @@ class SeaMetricsCT2X : public Sensor
          return false;
       }
 
-#if HASTIG_SEAMETRICS_DE_TOGGLE
       RS485.setPins(PIN_RS485_TX, PIN_RS485_DE_RE, PIN_RS485_DE_RE);
-#else
-      RS485.setPins(PIN_RS485_TX, -1, -1);
-#endif
       const int frameDelayUs = calcFrameDelayUs(s.sensor_baud);
       RS485.setDelays(frameDelayUs, frameDelayUs);
 
@@ -88,13 +84,14 @@ class SeaMetricsCT2X : public Sensor
       ModbusRTUClient.setTimeout(kTimeoutMs);
       _slaveId = s.sensor_addr;
       LOGI(TAG,
-           "SeaMetrics modbus uart tx=D%d rx=D%d de/re=%d baud=%lu addr=%u timeout=%lu",
+           "Seametrics modbus uart tx=D%d rx=D%d de/re=%d baud=%lu addr=%u timeout=%lu",
            (int)PIN_RS485_TX,
            (int)PIN_RS485_RX,
-           HASTIG_SEAMETRICS_DE_TOGGLE ? (int)PIN_RS485_DE_RE : -1,
+           (int)PIN_RS485_DE_RE,
            (unsigned long)s.sensor_baud,
            (unsigned int)_slaveId,
            (unsigned long)kTimeoutMs);
+      _discardNextSample = true;
       _started = true;
       return true;
    }
@@ -103,6 +100,7 @@ class SeaMetricsCT2X : public Sensor
    {
       ModbusRTUClient.end();
       _started = false;
+      _discardNextSample = true;
    }
 
    bool sample(SensorSampleMsg& out) override
@@ -113,14 +111,36 @@ class SeaMetricsCT2X : public Sensor
       }
 
       uint16_t regs[kTelemetryRegCount] = {};
-      if (!readRegisters(HOLDING_REGISTERS, kTelemetryStartReg, regs, kTelemetryRegCount) &&
-          !readRegisters(INPUT_REGISTERS, kTelemetryStartReg, regs, kTelemetryRegCount))
+      const int requested =
+          ModbusRTUClient.requestFrom((int)_slaveId, HOLDING_REGISTERS, kTelemetryStartReg, kTelemetryRegCount);
+      if (requested != kTelemetryRegCount)
       {
          return false;
       }
 
-      float temp = registersToFloat(regs[0], regs[1]);
-      float cond = registersToFloat(regs[2], regs[3]);
+      for (int i = 0; i < kTelemetryRegCount; i++)
+      {
+         if (ModbusRTUClient.available() <= 0)
+         {
+            return false;
+         }
+         const long v = ModbusRTUClient.read();
+         if (v < 0 || v > 0xFFFF)
+         {
+            return false;
+         }
+         regs[i] = (uint16_t)v;
+      }
+
+      // First read after begin() is known invalid on this sensor.
+      if (_discardNextSample)
+      {
+         _discardNextSample = false;
+         return false;
+      }
+
+      const float temp = doubleWordToFloat(regs[0], regs[1]);
+      const float cond = doubleWordToFloat(regs[2], regs[3]);
 
       strncpy(out.k0, "cond", sizeof(out.k0));
       out.k0[sizeof(out.k0) - 1] = '\0';
@@ -148,40 +168,17 @@ class SeaMetricsCT2X : public Sensor
       return (int)((35UL * 1000000UL + (baud - 1UL)) / baud);
    }
 
-   static float registersToFloat(uint16_t hiWord, uint16_t loWord)
+   static float doubleWordToFloat(uint16_t highWord, uint16_t lowWord)
    {
-      const uint32_t bits = ((uint32_t)hiWord << 16) | (uint32_t)loWord;
+      const uint32_t bits = ((uint32_t)highWord << 16) | (uint32_t)lowWord;
       float          out  = 0.0f;
       memcpy(&out, &bits, sizeof(out));
       return out;
    }
 
-   bool readRegisters(int type, int startReg, uint16_t* out, int count)
-   {
-      const int requested = ModbusRTUClient.requestFrom((int)_slaveId, type, startReg, count);
-      if (requested != count)
-      {
-         return false;
-      }
-
-      for (int i = 0; i < count; i++)
-      {
-         if (ModbusRTUClient.available() <= 0)
-         {
-            return false;
-         }
-         const long v = ModbusRTUClient.read();
-         if (v < 0 || v > 0xFFFF)
-         {
-            return false;
-         }
-         out[i] = (uint16_t)v;
-      }
-      return true;
-   }
-
    uint8_t _slaveId = 1;
    bool    _started = false;
+   bool    _discardNextSample = true;
 };
 
 class PT12Sensor : public Sensor
@@ -224,7 +221,7 @@ Sensor* Sensor::create(uint32_t sensorType)
    case 0:
       return new FakeSensor();
    case 1:
-      return new SeaMetricsCT2X();
+      return new SeametricsCT2X();
    case 2:
       return new PT12Sensor();
    default:

@@ -16,11 +16,11 @@ class PowerManager;
  * @brief Application orchestrator (state machine).
  *
  * States:
- *  - DeepSleep: RTC wake in main.cpp (later integration)
  *  - Aware: network+MQTT up, awaiting commands
  *  - Sampling: sampling+aggregation+publishing
+ *  - Hibernating: shutdown requested; deep sleep executed by PowerManager from loop()
  *
- * NOTE: Deep sleep is executed from Arduino loop via PowerManager.
+ * NOTE: Low-level deep sleep entry is executed from Arduino loop via PowerManager.
  */
 
 class Orchestrator {
@@ -40,7 +40,7 @@ public:
   void stop();
 
 private:
-  enum class State : uint8_t { BootWaitComms, Aware, Sampling, Hibernating };
+  enum class State : uint8_t { Aware, Sampling, Hibernating };
 
   enum class HibernateReason : uint8_t { Inactivity, Forced, EmergencyPowerSave, NoNetwork };
 
@@ -55,15 +55,14 @@ private:
 
   rtos::Thread _thread;
 
-  State    _state          = State::BootWaitComms;
+  State    _state          = State::Aware;
   uint32_t _stateEnterMs   = 0;
 
-  uint32_t _unackedPkts    = 0;
   uint32_t _lastAckMs      = 0;
+  uint32_t _unackedAggregateCount = 0;
 
   uint32_t _bootMs         = 0;
   uint32_t _mqttUpMs       = 0;
-  bool     _commsReady     = false;
   bool     _noNetworkHibernateRequested = false;
 
   uint32_t _lastActivityMs = 0;
