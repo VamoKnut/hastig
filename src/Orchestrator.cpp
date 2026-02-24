@@ -21,12 +21,31 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <chrono>
 using namespace std::chrono;
 
 static const char* TAG = "ORCH";
+
+namespace {
+bool parseUnsigned(const char* text, uint32_t& outValue)
+{
+  if (text == nullptr || text[0] == '\0') {
+    return false;
+  }
+
+  char* endPtr = nullptr;
+  const unsigned long parsed = strtoul(text, &endPtr, 10);
+  if (endPtr == text || (endPtr != nullptr && *endPtr != '\0')) {
+    return false;
+  }
+
+  outValue = (uint32_t)parsed;
+  return true;
+}
+} // namespace
 
 /**
  * @brief Construct orchestrator.
@@ -269,6 +288,100 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
   LOGW(TAG, "Unknown command");
 }
 
+void Orchestrator::handleUiEvent(const UiEventMsg& uiEvt)
+{
+  if (strcmp(uiEvt.topic, "key") == 0) {
+    return;
+  }
+
+  if (strcmp(uiEvt.topic, "cmd") == 0) {
+    char commandType[48] = {0};
+
+    JsonDocument retvalDoc;
+    const auto parseErr = deserializeJson(retvalDoc, uiEvt.value);
+    if (!parseErr) {
+      const char* valueStr = retvalDoc["value"] | "";
+      strncpy(commandType, valueStr, sizeof(commandType));
+      commandType[sizeof(commandType) - 1] = '\0';
+    } else {
+      strncpy(commandType, uiEvt.value, sizeof(commandType));
+      commandType[sizeof(commandType) - 1] = '\0';
+    }
+
+    if (commandType[0] == '\0') {
+      LOGW(TAG, "UI cmd ignored (empty value)");
+      return;
+    }
+
+    JsonDocument cmdDoc;
+    cmdDoc[protocol::kKeyType] = commandType;
+
+    char cmdJson[128];
+    const size_t n = serializeJson(cmdDoc, cmdJson, sizeof(cmdJson));
+    if (n == 0) {
+      LOGW(TAG, "UI cmd ignored (serialize failed)");
+      return;
+    }
+
+    handleServerCommand("ui/cmd", cmdJson);
+    return;
+  }
+
+  if (strcmp(uiEvt.topic, "setup") == 0) {
+    JsonDocument retvalDoc;
+    const auto parseErr = deserializeJson(retvalDoc, uiEvt.value);
+    if (parseErr) {
+      LOGW(TAG, "UI setup ignored (bad JSON)");
+      return;
+    }
+
+    const char* prop = retvalDoc["prop"] | "";
+    if (prop[0] == '\0') {
+      LOGW(TAG, "UI setup ignored (missing prop)");
+      return;
+    }
+
+    JsonDocument patchDoc;
+    JsonVariantConst valueNode = retvalDoc["value"];
+
+    if (valueNode.is<const char*>()) {
+      const char* valueStr = valueNode.as<const char*>();
+      uint32_t numeric = 0;
+      if (parseUnsigned(valueStr, numeric)) {
+        patchDoc[prop] = numeric;
+      } else {
+        patchDoc[prop] = valueStr;
+      }
+    } else if (valueNode.is<uint32_t>()) {
+      patchDoc[prop] = valueNode.as<uint32_t>();
+    } else if (valueNode.is<int32_t>()) {
+      patchDoc[prop] = valueNode.as<int32_t>();
+    } else if (valueNode.is<double>()) {
+      patchDoc[prop] = valueNode.as<double>();
+    } else if (valueNode.is<float>()) {
+      patchDoc[prop] = valueNode.as<float>();
+    } else if (valueNode.is<bool>()) {
+      patchDoc[prop] = valueNode.as<bool>();
+    } else {
+      LOGW(TAG, "UI setup ignored (unsupported value type)");
+      return;
+    }
+
+    char patchJson[160];
+    const size_t n = serializeJson(patchDoc, patchJson, sizeof(patchJson));
+    if (n == 0) {
+      LOGW(TAG, "UI setup ignored (serialize failed)");
+      return;
+    }
+
+    _commsEgress.applySettingsJson(patchJson);
+    _commsEgress.publishConfig();
+    return;
+  }
+
+  LOGD(TAG, "UI event ignored topic=%s", uiEvt.topic);
+}
+
 /**
  * @brief Handle keep-sampling ack (server heartbeat).
  */
@@ -381,8 +494,8 @@ void Orchestrator::run()
     DeviceEvent evt;
     if (_eventBus.tryGetNext(evt, 20)) {
       if (evt.type == DeviceEvent::Type::Ui) {
-        // UI events (currently just logged; you will replace with your menu system)
-        LOGD(TAG, "UI event %s=%s", evt.data.ui.topic, evt.data.ui.value);
+        _lastActivityMs = nowMs;
+        handleUiEvent(evt.data.ui);
       } else if (evt.type == DeviceEvent::Type::Worker) {
         const WorkerEventMsg& w = evt.data.worker;
         _lastActivityMs = nowMs;

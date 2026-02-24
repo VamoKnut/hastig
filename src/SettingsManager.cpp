@@ -5,6 +5,8 @@
 #include <Arduino.h>
 #include <platform/ScopedLock.h>
 #include <mbed.h>
+#include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const char* TAG = "SET";
@@ -15,6 +17,82 @@ static constexpr uint32_t kDefaultSleepS      = 3600u;
 static constexpr uint32_t kMinStatusIntervalS = 30u;
 static constexpr uint32_t kDefaultStatusIntervalS = 120u;
 static constexpr uint32_t kMaxSleepDurationS  = 43200u;
+
+namespace {
+bool parseDoubleFromText(const char* text, double& out)
+{
+  if (text == nullptr || text[0] == '\0') {
+    return false;
+  }
+
+  char* endPtr = nullptr;
+  out = strtod(text, &endPtr);
+  if (endPtr == text) {
+    return false;
+  }
+
+  while (*endPtr == ' ' || *endPtr == '\t' || *endPtr == '\r' || *endPtr == '\n') {
+    endPtr++;
+  }
+  return (*endPtr == '\0');
+}
+
+bool jsonToDouble(const JsonVariantConst valueNode, double& out)
+{
+  if (valueNode.is<double>()) {
+    out = valueNode.as<double>();
+    return true;
+  }
+  if (valueNode.is<float>()) {
+    out = (double)valueNode.as<float>();
+    return true;
+  }
+  if (valueNode.is<uint32_t>()) {
+    out = (double)valueNode.as<uint32_t>();
+    return true;
+  }
+  if (valueNode.is<uint16_t>()) {
+    out = (double)valueNode.as<uint16_t>();
+    return true;
+  }
+  if (valueNode.is<uint8_t>()) {
+    out = (double)valueNode.as<uint8_t>();
+    return true;
+  }
+  if (valueNode.is<int32_t>()) {
+    out = (double)valueNode.as<int32_t>();
+    return true;
+  }
+  if (valueNode.is<const char*>()) {
+    return parseDoubleFromText(valueNode.as<const char*>(), out);
+  }
+  return false;
+}
+
+bool numericEqualsInteger(const JsonVariantConst valueNode, uint32_t current)
+{
+  double candidate = 0.0;
+  if (!jsonToDouble(valueNode, candidate)) {
+    return false;
+  }
+
+  const double rounded = floor(candidate + 0.5);
+  if (fabs(candidate - rounded) > 0.000001) {
+    return false;
+  }
+
+  return ((uint32_t)rounded == current);
+}
+
+bool numericEqualsFloat(const JsonVariantConst valueNode, float current)
+{
+  double candidate = 0.0;
+  if (!jsonToDouble(valueNode, candidate)) {
+    return false;
+  }
+  return (fabs(candidate - (double)current) <= 0.0005);
+}
+} // namespace
 
 struct StoredBlob {
   uint32_t    magic;
@@ -53,6 +131,7 @@ void SettingsManager::begin()
   }
 
   clampRuntimeSettingsUnlocked();
+  _revision++;
   LOGI(TAG,
        "Settings loaded: apn=%s mqtt=%s:%u sample_ms=%lu agg_s=%lu",
        _s.apn,
@@ -186,6 +265,7 @@ bool SettingsManager::applyJson(const char* json, bool persist)
   }
 
   clampRuntimeSettingsUnlocked();
+  _revision++;
 
   if (persist) {
     return save();
@@ -318,6 +398,7 @@ void SettingsManager::setRuntime(const AppSettings& s)
   mbed::ScopedLock<rtos::Mutex> lock(_mx);
   _s = s;
   clampRuntimeSettingsUnlocked();
+  _revision++;
 }
 
 /**
@@ -327,7 +408,14 @@ void SettingsManager::factoryReset()
 {
   mbed::ScopedLock<rtos::Mutex> lock(_mx);
   setDefaults();
+  _revision++;
   (void)save();
+}
+
+uint32_t SettingsManager::revision() const
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  return _revision;
 }
 
 static const char* maskIfSet(const char* v)
@@ -380,4 +468,73 @@ void SettingsManager::addMaskedConfigFields(JsonDocument& doc, ConfigSection sec
     doc["maxForcedSleepS"]    = s.max_forced_sleep_s;
     doc["maxUnackedPackets"]  = s.max_unacked_packets;
   }
+}
+
+bool SettingsManager::onIsItemSelectedEvent(const JsonVariantConst itemRetVal)
+{
+  const char* prop = itemRetVal["prop"] | "";
+  if (prop[0] == '\0') {
+    return false;
+  }
+
+  const JsonVariantConst valueNode = itemRetVal["value"];
+  if (valueNode.isNull()) {
+    return false;
+  }
+
+  const AppSettings s = getCopy();
+
+  if (strcmp(prop, "sensorAddress") == 0) {
+    return numericEqualsInteger(valueNode, s.sensor_addr);
+  }
+  if (strcmp(prop, "sensorBaudrate") == 0) {
+    return numericEqualsInteger(valueNode, s.sensor_baud);
+  }
+  if (strcmp(prop, "sensorWarmupMs") == 0) {
+    return numericEqualsInteger(valueNode, s.sensor_warmup_ms);
+  }
+  if (strcmp(prop, "sensorType") == 0) {
+    return numericEqualsInteger(valueNode, s.sensor_type);
+  }
+  if (strcmp(prop, "samplingInterval") == 0) {
+    return numericEqualsInteger(valueNode, s.sample_period_ms);
+  }
+  if (strcmp(prop, "aggPeriodS") == 0) {
+    return numericEqualsInteger(valueNode, s.agg_period_s);
+  }
+  if (strcmp(prop, "mqttPort") == 0) {
+    return numericEqualsInteger(valueNode, s.mqtt_port);
+  }
+  if (strcmp(prop, "awareTimeoutS") == 0) {
+    return numericEqualsInteger(valueNode, s.aware_timeout_s);
+  }
+  if (strcmp(prop, "defaultSleepS") == 0) {
+    return numericEqualsInteger(valueNode, s.default_sleep_s);
+  }
+  if (strcmp(prop, "statusIntervalS") == 0) {
+    return numericEqualsInteger(valueNode, s.status_interval_s);
+  }
+  if (strcmp(prop, "lowBattMinV") == 0) {
+    return numericEqualsFloat(valueNode, s.low_batt_min_v);
+  }
+  if (strcmp(prop, "maxChargingCurrent") == 0) {
+    return numericEqualsInteger(valueNode, s.max_charging_current);
+  }
+  if (strcmp(prop, "maxChargingVoltage") == 0) {
+    return numericEqualsFloat(valueNode, s.max_charging_voltage);
+  }
+  if (strcmp(prop, "emergencyDelayS") == 0) {
+    return numericEqualsInteger(valueNode, s.emergency_delay_s);
+  }
+  if (strcmp(prop, "emergencySleepS") == 0) {
+    return numericEqualsInteger(valueNode, s.emergency_sleep_s);
+  }
+  if (strcmp(prop, "maxForcedSleepS") == 0) {
+    return numericEqualsInteger(valueNode, s.max_forced_sleep_s);
+  }
+  if (strcmp(prop, "maxUnackedPackets") == 0) {
+    return numericEqualsInteger(valueNode, s.max_unacked_packets);
+  }
+
+  return false;
 }

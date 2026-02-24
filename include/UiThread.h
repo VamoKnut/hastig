@@ -6,14 +6,16 @@
 #include "AppConfig.h"
 #include "BoardHal.h"
 #include "EventBus.h"
+#include "LcdMenu.h"
 #include "Messages.h"
+#include "SettingsManager.h"
 
 /**
  * @brief UI thread: OLED (U8G2) + 4 keys.
  */
-class UiThread {
+class UiThread : public IMenuEventListener {
 public:
-  UiThread(EventBus& eventBus);
+  UiThread(EventBus& eventBus, SettingsManager& settings);
 
   /**
    * @brief Start RTOS thread.
@@ -25,9 +27,13 @@ public:
    * @brief Update status lines.
    */
   void set_status(const char* line1, const char* line2);
+  void onItemSelectedEvent(const JsonVariantConst itemRetVal) override;
 
 private:
-    EventBus& _eventBus;
+  EventBus& _eventBus;
+  SettingsManager& _settings;
+  LcdMenu   _menu;
+  uint32_t  _lastSettingsRevision = 0;
 
   rtos::Thread _thread;
 
@@ -39,4 +45,5 @@ private:
   void run();
 
   void post_key(BoardHal::Button b);
+  LcdMenu::Key toMenuKey(BoardHal::Button b) const;
 };

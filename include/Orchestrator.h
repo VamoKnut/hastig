@@ -10,6 +10,7 @@ class SessionClock;
 class SamplingThread;
 class AggregatorThread;
 class PowerManager;
+struct UiEventMsg;
 
 
 /**
@@ -80,6 +81,7 @@ private:
   void enterState(State s);
 
   void handleServerCommand(const char* topic, const char* json);
+  void handleUiEvent(const UiEventMsg& uiEvt);
   void handleAck();
 
   void checkTimeouts();

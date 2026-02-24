@@ -5,6 +5,8 @@
 #include <platform/ScopedLock.h>
 #include <stdint.h>
 
+#include "LcdMenu.h"
+
 /**
  * @brief Hastig settings stored in flash.
  */
@@ -55,7 +57,7 @@ struct AppSettings {
 /**
  * @brief Thread-safe settings storage with flash persistence.
  */
-class SettingsManager {
+class SettingsManager : public IMenuItemSelectedEventListener {
 public:
   /**
    * @brief Load settings from flash, or defaults.
@@ -102,10 +104,21 @@ public:
    */
   void addMaskedConfigFields(JsonDocument& doc, ConfigSection section) const;
 
+  /**
+   * @brief Monotonic revision that increments when runtime settings are updated.
+   */
+  uint32_t revision() const;
+
+  /**
+   * @brief Menu inquiry hook used to render check-marks for active option values.
+   */
+  bool onIsItemSelectedEvent(const JsonVariantConst itemRetVal) override;
+
 
 private:
   mutable rtos::Mutex _mx;
   AppSettings         _s;
+  uint32_t            _revision = 0;
 
   bool loadFromFlash();
   void setDefaults();

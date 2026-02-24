@@ -8,6 +8,7 @@
 #include "Logger.h"
 #include "Messages.h"
 #include "ConsoleCommands.h"
+#include "Display.h"
 #include "RestartReason.h"
 #include "PowerUtil.h"
 #include "PowerManager.h"
@@ -52,14 +53,15 @@ void setup()
 
   bootM4();
 
+  Display::getInstance().beginHardware();
+  Display::getInstance().showSplash(HASTIG_AI_REVISION);
+
   Serial.begin(115200);
   Logger::begin(Serial, 115200);
   delay(2500);
   Logger::set_runtime_level(Logger::Level::Debug);
 
-  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: v123) ===");
-
-  
+  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: %s) ===", HASTIG_AI_REVISION);
 
   sysCtx.powerManager.setOrchestrator(sysCtx.orchestrator);
 

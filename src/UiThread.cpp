@@ -1,27 +1,26 @@
 #include "UiThread.h"
 
+#include "Display.h"
 #include "Logger.h"
+#include "MenuDef.h"
 #include "TimeUtil.h"
 #include "BoardHal.h"
 #include "StopUtil.h"
 #include <Arduino.h>
 #include <platform/ScopedLock.h>
 #include <cmsis_os2.h>
-#include <U8g2lib.h>
 
 #include <chrono>
 using namespace std::chrono;
 
 static const char* TAG = "UI";
 
-// Full-buffer I2C 128x64
-static U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
-
 /**
  * @brief Construct UI thread.
  */
-UiThread::UiThread(EventBus& eventBus)
+UiThread::UiThread(EventBus& eventBus, SettingsManager& settings)
     : _eventBus(eventBus),
+      _settings(settings),
       _thread(PRIO_UI, STACK_UI, nullptr, "UI")
 {
 }
@@ -47,6 +46,25 @@ void UiThread::set_status(const char* line1, const char* line2)
 
   _line1[sizeof(_line1) - 1] = '\0';
   _line2[sizeof(_line2) - 1] = '\0';
+}
+
+void UiThread::onItemSelectedEvent(const JsonVariantConst itemRetVal)
+{
+  UiEventMsg e{};
+  e.ts_ms = timeutil::nowMs();
+
+  const char* topic = itemRetVal["topic"] | "menu";
+  strncpy(e.topic, topic, sizeof(e.topic));
+  e.topic[sizeof(e.topic) - 1] = '\0';
+
+  const size_t n = serializeJson(itemRetVal, e.value, sizeof(e.value));
+  if (n == 0) {
+    e.value[0] = '\0';
+  } else {
+    e.value[sizeof(e.value) - 1] = '\0';
+  }
+
+  _eventBus.publishUi(e);
 }
 
 /**
@@ -91,36 +109,58 @@ void UiThread::run()
 {
   LOGI(TAG, "Thread started");
 
-  u8g2.begin();
-  u8g2.setFont(u8g2_font_6x12_tf);
+  Display::getInstance().beginHardware();
+  _lastSettingsRevision = _settings.revision();
+
+  _menu.setEventListener(this);
+  _menu.setDynamicProvider(&_settings);
+  const bool menuReady = _menu.init(kLedMenuJson);
+  if (!menuReady) {
+    Display::getInstance().showMessage("Menu parse fail");
+  } else {
+    _menu.action(LcdMenu::Key::None);
+  }
 
   while (true) {
-    // Wait for button activity or periodic UI refresh.
+    // Wait for button activity or periodic wakeup.
     (void)BoardHal::waitForButtonEvent(200);
 
     BoardHal::Button b;
     while (BoardHal::popButton(b)) {
       post_key(b);
+      if (menuReady) {
+        _menu.action(toMenuKey(b));
+      }
     }
 
-    char l1[22];
-    char l2[22];
-    {
-      mbed::ScopedLock<rtos::Mutex> lock(_mx);
-      strncpy(l1, _line1, sizeof(l1));
-      strncpy(l2, _line2, sizeof(l2));
-      l1[sizeof(l1) - 1] = '\0';
-      l2[sizeof(l2) - 1] = '\0';
+    if (menuReady) {
+      const uint32_t settingsRevision = _settings.revision();
+      if (settingsRevision != _lastSettingsRevision) {
+        _lastSettingsRevision = settingsRevision;
+        _menu.refresh();
+      }
     }
-
-    u8g2.clearBuffer();
-    u8g2.drawStr(0, 14, l1);
-    u8g2.drawStr(0, 28, l2);
-    u8g2.sendBuffer();
   }
 }
 
 void UiThread::stop()
 {
   stoputil::terminateThread("UiThread", _thread);
+}
+
+LcdMenu::Key UiThread::toMenuKey(BoardHal::Button b) const
+{
+  if (b == BoardHal::Button::Up) {
+    return LcdMenu::Key::Up;
+  }
+  if (b == BoardHal::Button::Down) {
+    return LcdMenu::Key::Down;
+  }
+  if (b == BoardHal::Button::Left) {
+    return LcdMenu::Key::Back;
+  }
+  if (b == BoardHal::Button::Right) {
+    return LcdMenu::Key::Confirm;
+  }
+  return LcdMenu::Key::None;
 }

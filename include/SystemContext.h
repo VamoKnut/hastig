@@ -55,7 +55,7 @@ struct SystemContext {
         eventBus(mailboxes.uiToOrchMail, mailboxes.commsToOrchMail, mailboxes.workerToOrchMail),
         commandBus(mailboxes.orchToCommsMail),
         commsEgress(commandBus, mailboxes.aggToCommsMail),
-        uiThread(eventBus),
+        uiThread(eventBus, settings),
         samplingThread(mailboxes.sensorToAggMail, settings, sessionClock, eventBus),
         aggThread(mailboxes.sensorToAggMail, commsEgress, settings, sessionClock,
                   eventBus),
