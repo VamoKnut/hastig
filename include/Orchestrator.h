@@ -10,6 +10,7 @@ class SessionClock;
 class SamplingThread;
 class AggregatorThread;
 class PowerManager;
+class RuntimeStatus;
 struct UiEventMsg;
 
 
@@ -32,7 +33,8 @@ public:
                SessionClock& clock,
                SamplingThread& sensor,
                AggregatorThread& agg,
-               PowerManager& powerManager);
+               PowerManager& powerManager,
+               RuntimeStatus& runtimeStatus);
 
   /**
    * @brief Start orchestrator RTOS thread.
@@ -53,6 +55,7 @@ private:
   SamplingThread&   _sensor;
   AggregatorThread& _agg;
   PowerManager&     _powerManager;
+  RuntimeStatus&    _runtimeStatus;
 
   rtos::Thread _thread;
 

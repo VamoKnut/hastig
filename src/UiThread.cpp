@@ -18,9 +18,10 @@ static const char* TAG = "UI";
 /**
  * @brief Construct UI thread.
  */
-UiThread::UiThread(EventBus& eventBus, SettingsManager& settings)
+UiThread::UiThread(EventBus& eventBus, SettingsManager& settings, RuntimeStatus& runtimeStatus)
     : _eventBus(eventBus),
       _settings(settings),
+      _runtimeStatus(runtimeStatus),
       _thread(PRIO_UI, STACK_UI, nullptr, "UI")
 {
 }
@@ -111,15 +112,17 @@ void UiThread::run()
 
   Display::getInstance().beginHardware();
   _lastSettingsRevision = _settings.revision();
+  const AppSettings s = _settings.getCopy();
+  _runtimeStatus.setAwareWindow(timeutil::nowMs(), s.aware_timeout_s);
 
   _menu.setEventListener(this);
   _menu.setDynamicProvider(&_settings);
   const bool menuReady = _menu.init(kLedMenuJson);
   if (!menuReady) {
     Display::getInstance().showMessage("Menu parse fail");
-  } else {
-    _menu.action(LcdMenu::Key::None);
   }
+  _statusMode = true;
+  renderStatus();
 
   while (true) {
     // Wait for button activity or periodic wakeup.
@@ -128,12 +131,29 @@ void UiThread::run()
     BoardHal::Button b;
     while (BoardHal::popButton(b)) {
       post_key(b);
+
+      if (_statusMode) {
+        if (b == BoardHal::Button::Left || b == BoardHal::Button::Right) {
+          _statusMode = false;
+          if (menuReady) {
+            _menu.refresh();
+          }
+        }
+        continue;
+      }
+
       if (menuReady) {
+        if (b == BoardHal::Button::Left && _menu.isAtRootLevel()) {
+          _statusMode = true;
+          continue;
+        }
         _menu.action(toMenuKey(b));
       }
     }
 
-    if (menuReady) {
+    if (_statusMode) {
+      renderStatus();
+    } else if (menuReady) {
       const uint32_t settingsRevision = _settings.revision();
       if (settingsRevision != _lastSettingsRevision) {
         _lastSettingsRevision = settingsRevision;
@@ -163,4 +183,18 @@ LcdMenu::Key UiThread::toMenuKey(BoardHal::Button b) const
     return LcdMenu::Key::Confirm;
   }
   return LcdMenu::Key::None;
+}
+
+void UiThread::renderStatus()
+{
+  const RuntimeStatus::Mode mode = _runtimeStatus.mode();
+  if (mode == RuntimeStatus::Mode::Sampling) {
+    SensorSampleMsg sample;
+    const bool hasSample = _runtimeStatus.getLastSample(sample);
+    Display::getInstance().renderStatusSampling(sample, hasSample);
+    return;
+  }
+
+  const uint32_t remainingMs = _runtimeStatus.awareRemainingMs(timeutil::nowMs());
+  Display::getInstance().renderStatusAware(remainingMs);
 }

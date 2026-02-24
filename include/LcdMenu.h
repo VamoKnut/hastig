@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <array>
 #include <vector>
 
 class IMenuEventListener {
@@ -15,6 +16,12 @@ class IMenuItemSelectedEventListener {
 public:
   virtual ~IMenuItemSelectedEventListener() = default;
   virtual bool onIsItemSelectedEvent(const JsonVariantConst itemRetVal) = 0;
+  virtual bool getStringSettingValue(const char* prop, String& outValue)
+  {
+    (void)prop;
+    outValue = "";
+    return false;
+  }
 };
 
 class MenuNode
@@ -54,7 +61,7 @@ private:
 class LcdMenu
 {
 public:
-  enum class DisplayMode { MENU, TERMINAL };
+  enum class DisplayMode { MENU, TERMINAL, TEXT_EDITOR };
   enum class Key { None, Up, Down, Back, Confirm };
 
   LcdMenu();
@@ -63,6 +70,7 @@ public:
   void action(Key key);
   void refresh();
   void reset();
+  bool isAtRootLevel() const;
 
   void setEventListener(IMenuEventListener* l);
   void removeEventListener(IMenuEventListener* l);
@@ -75,6 +83,20 @@ public:
   DisplayMode setDisplayMode(DisplayMode newMode);
 
 private:
+  enum class EditorCellAction : uint8_t { None, Append, Delete, Confirm, Cancel, ToggleCase };
+
+  struct EditorCell {
+    EditorCellAction action = EditorCellAction::None;
+    char             value = '\0';
+    char             label[2] = {' ', '\0'};
+  };
+
+  static constexpr size_t EDITOR_COLS = 16u;
+  static constexpr size_t EDITOR_ROWS = 3u;
+  static constexpr size_t EDITOR_CELL_CAPACITY = EDITOR_COLS * EDITOR_ROWS;
+  static constexpr size_t EDITOR_DEFAULT_MAX_LEN = 63u;
+  static constexpr size_t EDITOR_COMMAND_COUNT = 4u;
+
   JsonDocument _menuDoc;
   MenuNode*    _menuRoot;
   MenuNode*    _activeItem;
@@ -84,8 +106,29 @@ private:
   IMenuItemSelectedEventListener* _dynamicContentProvider;
   DisplayMode _displayMode;
 
+  String _editorSettingLabel;
+  String _editorPropName;
+  String _editorValue;
+  bool   _editorUpperCase;
+  size_t _editorMaxLen;
+  size_t _editorCursor;
+  size_t _editorSelected;
+  size_t _editorCellCount;
+  std::array<EditorCell, EDITOR_CELL_CAPACITY> _editorCells;
+  std::array<const char*, EDITOR_CELL_CAPACITY> _editorCellLabels;
+
   void cleanup();
   MenuNode* buildMenuTree(JsonArray menuItems, MenuNode* parent);
   void render();
   void notifyEventListeners(const JsonVariantConst eventData);
+  void handleEditorKey(Key key);
+  bool enterTextEditor(MenuNode* node);
+  void exitTextEditor(bool submit);
+  void rebuildEditorCells();
+  void clearEditorCells();
+  void setEditorCell(size_t index, EditorCellAction action, char value, char label);
+  size_t findEditorCellForChar(char c) const;
+  void syncSelectionToCursorChar();
+  void moveSelection(int delta);
+  bool editorAppendChar(char c);
 };

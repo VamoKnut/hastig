@@ -113,6 +113,7 @@ public:
    * @brief Menu inquiry hook used to render check-marks for active option values.
    */
   bool onIsItemSelectedEvent(const JsonVariantConst itemRetVal) override;
+  bool getStringSettingValue(const char* prop, String& outValue) override;
 
 
 private:

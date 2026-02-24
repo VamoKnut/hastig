@@ -3,7 +3,10 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 
+#include <stddef.h>
 #include <vector>
+
+#include "Messages.h"
 
 class MenuNode;
 class IMenuItemSelectedEventListener;
@@ -19,6 +22,15 @@ public:
 
   void listMenuItems(MenuNode* selectedNode);
   void listSelectableItems(MenuNode* selectedNode, IMenuItemSelectedEventListener* dcp);
+  void renderStatusAware(uint32_t remainingMs);
+  void renderStatusSampling(const SensorSampleMsg& sample, bool hasSample);
+  void renderTextEditor(const char* settingName,
+                        const char* settingValue,
+                        const char* const* gridCells,
+                        size_t cellCount,
+                        size_t selectedIndex,
+                        size_t columns,
+                        size_t cursorPosition);
 
   void showSplash(const char* revisionText);
   void showMessage(const char* text);

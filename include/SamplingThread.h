@@ -9,6 +9,7 @@
 #include "SessionClock.h"
 #include "Sensor.h"
 #include "EventBus.h"
+#include "RuntimeStatus.h"
 
 template <uint32_t DEPTH>
 using SensorMail = rtos::Mail<SensorSampleMsg, DEPTH>;
@@ -21,7 +22,8 @@ public:
   SamplingThread(SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& outMail,
              SettingsManager& settings,
              SessionClock& clock,
-             EventBus& eventBus);
+             EventBus& eventBus,
+             RuntimeStatus& runtimeStatus);
 
   /**
    * @brief Start RTOS thread.
@@ -39,6 +41,7 @@ private:
   SettingsManager&                         _settings;
   SessionClock&                          _clock;
   EventBus&                              _eventBus;
+  RuntimeStatus&                         _runtimeStatus;
 
   rtos::Thread     _thread;
   rtos::EventFlags _flags;

@@ -3,7 +3,7 @@ IndentWidth: 3
 TabWidth: 3
 UseTab: Never
 
-ColumnLimit: 100
+ColumnLimit: 160
 
 BreakBeforeBraces: Allman
 AllowShortIfStatementsOnASingleLine: false

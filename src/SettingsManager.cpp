@@ -538,3 +538,52 @@ bool SettingsManager::onIsItemSelectedEvent(const JsonVariantConst itemRetVal)
 
   return false;
 }
+
+bool SettingsManager::getStringSettingValue(const char* prop, String& outValue)
+{
+  outValue = "";
+  if (prop == nullptr || prop[0] == '\0') {
+    return false;
+  }
+
+  const AppSettings s = getCopy();
+
+  if (strcmp(prop, "simPin") == 0) {
+    outValue = s.sim_pin;
+    return true;
+  }
+  if (strcmp(prop, "apn") == 0) {
+    outValue = s.apn;
+    return true;
+  }
+  if (strcmp(prop, "apnUser") == 0) {
+    outValue = s.apn_user;
+    return true;
+  }
+  if (strcmp(prop, "apnPass") == 0) {
+    outValue = s.apn_pass;
+    return true;
+  }
+  if (strcmp(prop, "mqttHost") == 0) {
+    outValue = s.mqtt_host;
+    return true;
+  }
+  if (strcmp(prop, "mqttUser") == 0) {
+    outValue = s.mqtt_user;
+    return true;
+  }
+  if (strcmp(prop, "mqttPass") == 0) {
+    outValue = s.mqtt_pass;
+    return true;
+  }
+  if (strcmp(prop, "mqttClientId") == 0) {
+    outValue = s.mqtt_client_id;
+    return true;
+  }
+  if (strcmp(prop, "deviceName") == 0) {
+    outValue = s.device_name;
+    return true;
+  }
+
+  return false;
+}

@@ -13,6 +13,7 @@
 #include "SamplingThread.h"
 #include "SessionClock.h"
 #include "SettingsManager.h"
+#include "RuntimeStatus.h"
 #include "UiThread.h"
 
 /**
@@ -28,6 +29,7 @@ struct SystemContext {
   // Core services
   SettingsManager settings;
   SessionClock sessionClock;
+  RuntimeStatus runtimeStatus;
 
   // UI + event ingress
   EventBus eventBus;
@@ -55,8 +57,8 @@ struct SystemContext {
         eventBus(mailboxes.uiToOrchMail, mailboxes.commsToOrchMail, mailboxes.workerToOrchMail),
         commandBus(mailboxes.orchToCommsMail),
         commsEgress(commandBus, mailboxes.aggToCommsMail),
-        uiThread(eventBus, settings),
-        samplingThread(mailboxes.sensorToAggMail, settings, sessionClock, eventBus),
+        uiThread(eventBus, settings, runtimeStatus),
+        samplingThread(mailboxes.sensorToAggMail, settings, sessionClock, eventBus, runtimeStatus),
         aggThread(mailboxes.sensorToAggMail, commsEgress, settings, sessionClock,
                   eventBus),
         commsInbox(mailboxes.aggToCommsMail, mailboxes.orchToCommsMail),
@@ -64,7 +66,7 @@ struct SystemContext {
         powerManager(board, rrStore, commsPump, uiThread, aggThread, samplingThread,
                      wakePin),
         orchestrator(eventBus, commsEgress, settings, sessionClock, samplingThread, aggThread,
-                     powerManager)
+                     powerManager, runtimeStatus)
   {
   }
 };

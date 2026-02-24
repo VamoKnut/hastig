@@ -8,6 +8,7 @@
 #include "SamplingThread.h"
 #include "AggregatorThread.h"
 #include "PowerManager.h"
+#include "RuntimeStatus.h"
 #include "BoardHal.h"
 #include "HastigGlobals.h"
 
@@ -45,6 +46,45 @@ bool parseUnsigned(const char* text, uint32_t& outValue)
   outValue = (uint32_t)parsed;
   return true;
 }
+
+bool parseDoubleValue(const char* text, double& outValue)
+{
+  if (text == nullptr || text[0] == '\0') {
+    return false;
+  }
+
+  char* endPtr = nullptr;
+  outValue = strtod(text, &endPtr);
+  if (endPtr == text || (endPtr != nullptr && *endPtr != '\0')) {
+    return false;
+  }
+  return true;
+}
+
+bool setupPropIsNumeric(const char* prop)
+{
+  if (prop == nullptr) {
+    return false;
+  }
+
+  return strcmp(prop, "sensorAddress") == 0 ||
+         strcmp(prop, "sensorBaudrate") == 0 ||
+         strcmp(prop, "sensorWarmupMs") == 0 ||
+         strcmp(prop, "sensorType") == 0 ||
+         strcmp(prop, "samplingInterval") == 0 ||
+         strcmp(prop, "aggPeriodS") == 0 ||
+         strcmp(prop, "mqttPort") == 0 ||
+         strcmp(prop, "awareTimeoutS") == 0 ||
+         strcmp(prop, "defaultSleepS") == 0 ||
+         strcmp(prop, "statusIntervalS") == 0 ||
+         strcmp(prop, "lowBattMinV") == 0 ||
+         strcmp(prop, "maxChargingCurrent") == 0 ||
+         strcmp(prop, "maxChargingVoltage") == 0 ||
+         strcmp(prop, "emergencyDelayS") == 0 ||
+         strcmp(prop, "emergencySleepS") == 0 ||
+         strcmp(prop, "maxForcedSleepS") == 0 ||
+         strcmp(prop, "maxUnackedPackets") == 0;
+}
 } // namespace
 
 /**
@@ -56,7 +96,8 @@ Orchestrator::Orchestrator(EventBus& eventBus,
                            SessionClock& clock,
                            SamplingThread& sensor,
                            AggregatorThread& agg,
-                           PowerManager& powerManager)
+                           PowerManager& powerManager,
+                           RuntimeStatus& runtimeStatus)
     : _eventBus(eventBus),
       _commsEgress(commsEgress),
       _settings(settings),
@@ -64,6 +105,7 @@ Orchestrator::Orchestrator(EventBus& eventBus,
       _sensor(sensor),
       _agg(agg),
       _powerManager(powerManager),
+      _runtimeStatus(runtimeStatus),
       _thread(PRIO_ORCH, STACK_ORCH, nullptr, "Orch")
 {
 }
@@ -126,6 +168,10 @@ void Orchestrator::enterState(State s)
   _state        = s;
   _stateEnterMs = timeutil::nowMs();
   _lastActivityMs = _stateEnterMs;
+  _runtimeStatus.setMode(s == State::Sampling
+                             ? RuntimeStatus::Mode::Sampling
+                             : (s == State::Aware ? RuntimeStatus::Mode::Aware
+                                                  : RuntimeStatus::Mode::Hibernating));
 
   if (s == State::Aware) {
     LOGI(TAG, "State=aware");
@@ -346,9 +392,17 @@ void Orchestrator::handleUiEvent(const UiEventMsg& uiEvt)
 
     if (valueNode.is<const char*>()) {
       const char* valueStr = valueNode.as<const char*>();
-      uint32_t numeric = 0;
-      if (parseUnsigned(valueStr, numeric)) {
-        patchDoc[prop] = numeric;
+      if (setupPropIsNumeric(prop)) {
+        uint32_t numeric = 0;
+        double numericD = 0.0;
+        if (parseUnsigned(valueStr, numeric)) {
+          patchDoc[prop] = numeric;
+        } else if (parseDoubleValue(valueStr, numericD)) {
+          patchDoc[prop] = numericD;
+        } else {
+          LOGW(TAG, "UI setup ignored (numeric parse failed prop=%s)", prop);
+          return;
+        }
       } else {
         patchDoc[prop] = valueStr;
       }
@@ -375,7 +429,6 @@ void Orchestrator::handleUiEvent(const UiEventMsg& uiEvt)
     }
 
     _commsEgress.applySettingsJson(patchJson);
-    _commsEgress.publishConfig();
     return;
   }
 
@@ -398,6 +451,7 @@ void Orchestrator::checkTimeouts()
 {
   const AppSettings s    = _settings.getCopy();
   const uint32_t    now  = timeutil::nowMs();
+  _runtimeStatus.setAwareWindow(_lastActivityMs, s.aware_timeout_s);
 
   // Periodic battery/status reporting (aware + sampling).
   if (_state == State::Aware || _state == State::Sampling) {

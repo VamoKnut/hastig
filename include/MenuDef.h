@@ -155,7 +155,16 @@ static constexpr const char kLedMenuJson[] = R"JSON(
             {"label":"4.1", "retval":{"topic":"setup","prop":"maxChargingVoltage","value":4.1}},
             {"label":"4.2", "retval":{"topic":"setup","prop":"maxChargingVoltage","value":4.2}}
           ]
-        }
+        },
+        {"label":"Device name",    "type":"edit", "maxLen":47, "retval":{"topic":"setup","prop":"deviceName"}},
+        {"label":"SIM pin",        "type":"edit", "maxLen":15, "retval":{"topic":"setup","prop":"simPin"}},
+        {"label":"APN",            "type":"edit", "maxLen":63, "retval":{"topic":"setup","prop":"apn"}},
+        {"label":"APN user",       "type":"edit", "maxLen":31, "retval":{"topic":"setup","prop":"apnUser"}},
+        {"label":"APN pass",       "type":"edit", "maxLen":31, "retval":{"topic":"setup","prop":"apnPass"}},
+        {"label":"MQTT host",      "type":"edit", "maxLen":63, "retval":{"topic":"setup","prop":"mqttHost"}},
+        {"label":"MQTT user",      "type":"edit", "maxLen":31, "retval":{"topic":"setup","prop":"mqttUser"}},
+        {"label":"MQTT pass",      "type":"edit", "maxLen":31, "retval":{"topic":"setup","prop":"mqttPass"}},
+        {"label":"MQTT client id", "type":"edit", "maxLen":47, "retval":{"topic":"setup","prop":"mqttClientId"}}
       ]
     },
     {

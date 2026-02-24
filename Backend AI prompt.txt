@@ -12,3 +12,4 @@ All activity, planning, settings and results for one specific gauging is contain
 1) planning. The Hydrologist (or future automatic forecasting sub-system) see the need for a guaging at a location. The hydrologist will indicate a timeframe (earliest and latest time of the gauging) for the 
 gauging to be performed. This desition is based on en estimation of upcomming discharge of interest.
 2) Notifying care-takers. When a campaign is planned, the care-takers assigned to the proejct will be notified of the need of their service.
+0050002A3330510C38363436

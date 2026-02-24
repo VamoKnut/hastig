@@ -8,6 +8,7 @@
 #include "EventBus.h"
 #include "LcdMenu.h"
 #include "Messages.h"
+#include "RuntimeStatus.h"
 #include "SettingsManager.h"
 
 /**
@@ -15,7 +16,7 @@
  */
 class UiThread : public IMenuEventListener {
 public:
-  UiThread(EventBus& eventBus, SettingsManager& settings);
+  UiThread(EventBus& eventBus, SettingsManager& settings, RuntimeStatus& runtimeStatus);
 
   /**
    * @brief Start RTOS thread.
@@ -32,8 +33,10 @@ public:
 private:
   EventBus& _eventBus;
   SettingsManager& _settings;
+  RuntimeStatus& _runtimeStatus;
   LcdMenu   _menu;
   uint32_t  _lastSettingsRevision = 0;
+  bool      _statusMode = true;
 
   rtos::Thread _thread;
 
@@ -43,6 +46,7 @@ private:
 
   static void threadEntry(void* ctx);
   void run();
+  void renderStatus();
 
   void post_key(BoardHal::Button b);
   LcdMenu::Key toMenuKey(BoardHal::Button b) const;

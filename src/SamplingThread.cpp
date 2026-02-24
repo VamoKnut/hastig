@@ -13,11 +13,13 @@ using namespace std::chrono;
 static const char* TAG = "SENS";
 
 SamplingThread::SamplingThread(SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& outMail,
-                               SettingsManager& settings, SessionClock& clock, EventBus& eventBus)
+                               SettingsManager& settings, SessionClock& clock, EventBus& eventBus,
+                               RuntimeStatus& runtimeStatus)
     : _outMail(outMail),
       _settings(settings),
       _clock(clock),
       _eventBus(eventBus),
+      _runtimeStatus(runtimeStatus),
       _thread(PRIO_SENS, STACK_SENS, nullptr, "SENS")
 {
 }
@@ -113,6 +115,7 @@ void SamplingThread::run()
          tmp.ok        = ok;
          if (tmp.ok)
          {
+            _runtimeStatus.setLastSample(tmp);
             SensorSampleMsg* m = _outMail.try_alloc();
             if (m != nullptr)
             {
