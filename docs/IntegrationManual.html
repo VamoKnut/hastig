@@ -1,0 +1,378 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Hastig-H7-1 Integration Manual</title>
+<style>
+body { font-family: Arial, Helvetica, sans-serif; margin: 32px; line-height: 1.45; color: #111; }
+h1, h2, h3, h4 { color: #111; page-break-after: avoid; }
+h1 { font-size: 28px; margin-top: 0; }
+h2 { font-size: 22px; margin-top: 28px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+h3 { font-size: 18px; margin-top: 22px; }
+code { font-family: Consolas, "Courier New", monospace; background: #f5f5f5; padding: 1px 4px; border-radius: 3px; }
+pre { background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto; }
+pre code { background: transparent; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
+@page { size: A4; margin: 16mm; }
+</style>
+</head>
+<body>
+<h1 id="hastig-h7-1-integration-manual">Hastig-H7-1 Integration Manual</h1>
+<h2 id="1-general-overview-of-software-architecture">1. General Overview Of Software Architecture</h2>
+<h3 id="11-runtime-model">1.1 Runtime model</h3>
+<p>The firmware runs as a hybrid of:</p>
+<ul>
+<li>Arduino <code>setup()</code> and <code>loop()</code></li>
+<li>Multiple Mbed RTOS threads</li>
+<li>Mailbox/event-based communication between modules</li>
+</ul>
+<p>Main entry points:</p>
+<ul>
+<li><code>src/main.cpp</code></li>
+<li><code>include/SystemContext.h</code></li>
+</ul>
+<h3 id="12-main-components">1.2 Main components</h3>
+<ul>
+<li><code>Orchestrator</code> (<code>src/Orchestrator.cpp</code>)</li>
+<li>Device state machine (<code>aware</code>, <code>sampling</code>, <code>hibernating</code>)</li>
+<li>Command handling</li>
+<li>Timeout logic (inactivity, no-network, unacked aggregate fallback)</li>
+<li><code>CommsPump</code> (<code>src/CommsPump.cpp</code>)</li>
+<li>GSM + MQTT connectivity</li>
+<li>MQTT subscribe/publish</li>
+<li>Routes inbound MQTT to settings or orchestrator</li>
+<li><code>SamplingThread</code> (<code>src/SamplingThread.cpp</code>)</li>
+<li>Creates/owns sensor instance</li>
+<li>Produces <code>SensorSampleMsg</code></li>
+<li><code>AggregatorThread</code> (<code>src/AggregatorThread.cpp</code>)</li>
+<li>Consumes samples, builds aggregate window</li>
+<li>Emits <code>AggregateMsg</code></li>
+<li><code>UiThread</code> + <code>LcdMenu</code> (<code>src/UiThread.cpp</code>, <code>src/LcdMenu.cpp</code>)</li>
+<li>Button handling</li>
+<li>Status screen + local setup menu</li>
+<li><code>SettingsManager</code> (<code>src/SettingsManager.cpp</code>)</li>
+<li>Thread-safe runtime settings</li>
+<li>Flash persistence</li>
+<li><code>PowerManager</code> (<code>src/PowerManager.cpp</code>)</li>
+<li>Executes controlled sleep transaction</li>
+</ul>
+<h3 id="13-internal-data-flow">1.3 Internal data flow</h3>
+<ol>
+<li>Sensor pipeline:</li>
+<li><code>SamplingThread</code> -&gt; mailbox <code>sensorToAggMail</code> -&gt; <code>AggregatorThread</code> -&gt; mailbox <code>aggToCommsMail</code> -&gt; <code>CommsPump</code> -&gt; MQTT <code>/data</code></li>
+<li>Command pipeline:</li>
+<li>MQTT <code>/cmd</code> -&gt; <code>CommsPump</code> -&gt; <code>EventBus</code> -&gt; <code>Orchestrator</code></li>
+<li>Remote config pipeline:</li>
+<li>MQTT <code>/cfg</code> -&gt; <code>CommsPump</code> -&gt; <code>SettingsManager.applyJson(..., persist=true)</code></li>
+<li>Local UI setup pipeline:</li>
+<li>UI menu <code>topic=setup</code> -&gt; <code>UiThread</code> -&gt; <code>Orchestrator</code> -&gt; <code>CommsEgress.applySettingsJson(...)</code> -&gt; <code>CommsPump</code> -&gt; <code>SettingsManager</code></li>
+</ol>
+<h3 id="14-state-machine">1.4 State machine</h3>
+<ul>
+<li><code>aware</code></li>
+<li>Network connected, waiting for commands</li>
+<li>Periodic status reporting</li>
+<li><code>sampling</code></li>
+<li>Sampling + aggregation enabled</li>
+<li>Sends aggregate packets</li>
+<li>Returns to <code>aware</code> if <code>maxUnackedPackets</code> attempted publishes occur without <code>keepSampling</code></li>
+<li><code>hibernating</code></li>
+<li>Publish hibernation status/mode change</li>
+<li><code>PowerManager</code> performs sleep sequence</li>
+</ul>
+<h3 id="15-mqtt-topic-model">1.5 MQTT topic model</h3>
+<p>Topic format:</p>
+<p><code>&lt;prefix&gt;/&lt;nodeId&gt;/&lt;postfix&gt;</code></p>
+<p>Defaults from <code>include/AppConfig.h</code>:</p>
+<ul>
+<li><code>prefix</code>: <code>hastigNode</code></li>
+<li>command postfix: <code>cmd</code></li>
+<li>config postfix: <code>cfg</code></li>
+<li>data postfix: <code>data</code></li>
+<li>status postfix: <code>status</code></li>
+</ul>
+<p><code>nodeId</code> source:</p>
+<ul>
+<li><code>settings.device_name</code> if non-empty</li>
+<li>otherwise hardware ID (<code>BoardHal::getHardwareId</code>, 24 hex chars)</li>
+</ul>
+<h2 id="2-mqtt-integration-contract">2. MQTT Integration Contract</h2>
+<h3 id="21-common-rules">2.1 Common rules</h3>
+<ul>
+<li>Payloads are JSON objects.</li>
+<li>Unknown keys are ignored.</li>
+<li>Most numeric fields are integer unless explicitly float.</li>
+<li>Device subscribes to:</li>
+<li><code>&lt;prefix&gt;/&lt;nodeId&gt;/cmd</code></li>
+<li><code>&lt;prefix&gt;/&lt;nodeId&gt;/cfg</code></li>
+<li>Device publishes to:</li>
+<li><code>&lt;prefix&gt;/&lt;nodeId&gt;/status</code></li>
+<li><code>&lt;prefix&gt;/&lt;nodeId&gt;/data</code></li>
+</ul>
+<hr />
+<h3 id="22-incoming-messages-cmd">2.2 Incoming messages (<code>/cmd</code>)</h3>
+<p>Mandatory for all command messages:</p>
+<ul>
+<li><code>type</code> (string)</li>
+</ul>
+<p>Supported <code>type</code> values and optional keys:</p>
+<ol>
+<li><code>keepSampling</code></li>
+<li>Optional keys: none</li>
+<li><code>startSampling</code></li>
+<li>Optional keys:<ul>
+<li><code>samplingInterval</code> (uint, ms)</li>
+<li><code>aggPeriodS</code> (uint, seconds)</li>
+<li><code>sessionID</code> (string)</li>
+</ul>
+</li>
+<li><code>stopSampling</code></li>
+<li>Optional keys: none</li>
+<li><code>getConfig</code></li>
+<li>Optional keys: none</li>
+<li><code>hibernate</code></li>
+<li>Optional keys:<ul>
+<li><code>sleepSeconds</code> (uint)</li>
+</ul>
+</li>
+<li><code>nudge</code></li>
+<li>Optional keys: none</li>
+<li><code>resetBatteryStatistics</code></li>
+<li>Optional keys: none</li>
+<li><code>factoryReset</code></li>
+<li>Optional keys: none</li>
+</ol>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;startSampling&quot;,&quot;samplingInterval&quot;:1000,&quot;aggPeriodS&quot;:30,&quot;sessionID&quot;:&quot;A1&quot;}
+</code></pre>
+<hr />
+<h3 id="23-incoming-messages-cfg">2.3 Incoming messages (<code>/cfg</code>)</h3>
+<p><code>/cfg</code> payload is a JSON patch. No key is mandatory; include only keys to update.</p>
+<p>Recognized keys:</p>
+<ul>
+<li><code>sensorAddress</code> (uint8)</li>
+<li><code>sensorBaudrate</code> (uint32)</li>
+<li><code>sensorWarmupMs</code> (uint32)</li>
+<li><code>sensorType</code> (uint32)</li>
+<li><code>samplingInterval</code> (uint32, ms)</li>
+<li><code>aggPeriodS</code> (uint32, s)</li>
+<li><code>aggregationMethod</code> (string; currently accepted but not functionally used)</li>
+<li><code>simPin</code> (string)</li>
+<li><code>apn</code> (string)</li>
+<li><code>apnUser</code> (string)</li>
+<li><code>apnPass</code> (string)</li>
+<li><code>mqttHost</code> (string)</li>
+<li><code>mqttPort</code> (uint16)</li>
+<li><code>mqttUser</code> (string)</li>
+<li><code>mqttPass</code> (string)</li>
+<li><code>mqttClientId</code> (string)</li>
+<li><code>deviceName</code> (string)</li>
+<li><code>awareTimeoutS</code> (uint32)</li>
+<li><code>defaultSleepS</code> (uint32)</li>
+<li><code>statusIntervalS</code> (uint32)</li>
+<li><code>lowBattMinV</code> (float)</li>
+<li><code>maxChargingCurrent</code> (uint16)</li>
+<li><code>maxChargingVoltage</code> (float)</li>
+<li><code>emergencyDelayS</code> (uint32)</li>
+<li><code>emergencySleepS</code> (uint32)</li>
+<li><code>maxForcedSleepS</code> (uint32)</li>
+<li><code>maxUnackedPackets</code> (uint32)</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;samplingInterval&quot;:500,&quot;aggPeriodS&quot;:20,&quot;sensorAddress&quot;:3}
+</code></pre>
+<hr />
+<h3 id="24-outgoing-messages-status">2.4 Outgoing messages (<code>/status</code>)</h3>
+<p><code>/status</code> is multiplexed and carries several message types via <code>type</code>.</p>
+<h4 id="a-type-status">A) <code>type = "status"</code></h4>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"status"</code></li>
+<li><code>tsMs</code> (uint32)</li>
+<li><code>mode</code> (<code>aware</code> | <code>sampling</code> | <code>hibernating</code>)</li>
+</ul>
+<p>Optional keys (present for periodic battery status):</p>
+<ul>
+<li><code>batteryVoltage</code> (float)</li>
+<li><code>minimumVoltage</code> (float)</li>
+<li><code>batteryCurrent</code> (float)</li>
+<li><code>averageCurrent</code> (float)</li>
+</ul>
+<p>Optional keys (present for hibernate status):</p>
+<ul>
+<li><code>reason</code> (string)</li>
+<li><code>expectedDuration</code> (uint32, seconds)</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;status&quot;,&quot;tsMs&quot;:123456,&quot;mode&quot;:&quot;sampling&quot;,&quot;batteryVoltage&quot;:3.97,&quot;minimumVoltage&quot;:3.81,&quot;batteryCurrent&quot;:0.12,&quot;averageCurrent&quot;:0.09}
+</code></pre>
+<h4 id="b-type-modechange">B) <code>type = "modeChange"</code></h4>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"modeChange"</code></li>
+<li><code>previousMode</code> (string)</li>
+</ul>
+<p>Optional keys:</p>
+<ul>
+<li><code>mode</code> (string)</li>
+<li><code>reason</code> (string; used for hibernation transitions)</li>
+<li><code>expectedDuration</code> (uint32; used for hibernation transitions)</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;modeChange&quot;,&quot;mode&quot;:&quot;hibernating&quot;,&quot;previousMode&quot;:&quot;aware&quot;,&quot;reason&quot;:&quot;forced&quot;,&quot;expectedDuration&quot;:900}
+</code></pre>
+<h4 id="c-type-alert">C) <code>type = "alert"</code></h4>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"alert"</code></li>
+<li><code>message</code> (string)</li>
+<li><code>mode</code> (string)</li>
+<li><code>minimumVoltage</code> (float)</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;alert&quot;,&quot;message&quot;:&quot;Critically low battery detected. Emergency hibernate soon.&quot;,&quot;mode&quot;:&quot;sampling&quot;,&quot;minimumVoltage&quot;:2.74}
+</code></pre>
+<h4 id="d-type-config">D) <code>type = "config"</code></h4>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"config"</code></li>
+<li><code>tsMs</code> (uint32)</li>
+</ul>
+<p>Optional keys:</p>
+<ul>
+<li>Any masked config fields (single-message snapshot when payload is small enough)</li>
+</ul>
+<h4 id="e-type-configchunk">E) <code>type = "configChunk"</code></h4>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"configChunk"</code></li>
+<li><code>tsMs</code> (uint32)</li>
+<li><code>chunk</code> (uint8, 1-based)</li>
+<li><code>total</code> (uint8)</li>
+<li><code>section</code> (<code>network</code> | <code>mqtt</code> | <code>device</code> | <code>schedule</code> | <code>power</code>)</li>
+</ul>
+<p>Optional keys:</p>
+<ul>
+<li>Masked config keys for that section</li>
+</ul>
+<p>Notes:</p>
+<ul>
+<li>Secrets are masked as <code>"***"</code> when set (<code>simPin</code>, <code>apnUser</code>, <code>apnPass</code>, <code>mqttUser</code>, <code>mqttPass</code>).</li>
+</ul>
+<hr />
+<h3 id="25-outgoing-messages-data">2.5 Outgoing messages (<code>/data</code>)</h3>
+<p><code>/data</code> carries aggregated sensor windows.</p>
+<p>Mandatory keys:</p>
+<ul>
+<li><code>type</code> = <code>"data"</code></li>
+<li><code>t0</code> (uint32, relative start ms)</li>
+<li><code>t1</code> (uint32, relative end ms)</li>
+<li><code>n</code> (uint32, sample count in window)</li>
+<li><code>ok</code> (0 | 1)</li>
+<li><code>&lt;k0&gt;Avg</code> (float)</li>
+<li><code>&lt;k0&gt;Min</code> (float)</li>
+<li><code>&lt;k0&gt;Max</code> (float)</li>
+</ul>
+<p>Optional keys:</p>
+<ul>
+<li><code>&lt;k1&gt;Avg</code> (float)</li>
+<li><code>&lt;k1&gt;Min</code> (float)</li>
+<li><code>&lt;k1&gt;Max</code> (float)</li>
+<li>present when second metric exists</li>
+</ul>
+<p>Typical metric keys from current sensors:</p>
+<ul>
+<li><code>k0 = "cond"</code></li>
+<li><code>k1 = "temp"</code></li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;data&quot;,&quot;t0&quot;:10000,&quot;t1&quot;:25000,&quot;n&quot;:15,&quot;ok&quot;:1,&quot;condAvg&quot;:1.94,&quot;condMin&quot;:1.90,&quot;condMax&quot;:2.01,&quot;tempAvg&quot;:17.5,&quot;tempMin&quot;:17.4,&quot;tempMax&quot;:17.6}
+</code></pre>
+<h2 id="3-local-display-menu-structure">3. Local Display Menu Structure</h2>
+<p>Source of truth: <code>include/MenuDef.h</code>.</p>
+<h3 id="31-display-modes-and-key-behavior">3.1 Display modes and key behavior</h3>
+<p>There are two display modes:</p>
+<ol>
+<li><code>status</code> mode (default at boot)</li>
+<li><code>menu</code> mode</li>
+</ol>
+<p>Button behavior:</p>
+<ul>
+<li>In <code>status</code> mode:</li>
+<li><code>Left</code> or <code>Right</code> enters menu mode</li>
+<li>In <code>menu</code> mode:</li>
+<li><code>Up</code>/<code>Down</code>: move selection</li>
+<li><code>Right</code>: confirm/select</li>
+<li><code>Left</code>: back</li>
+<li><code>Left</code> at root: return to status mode</li>
+</ul>
+<h3 id="32-top-level-menu-tree">3.2 Top-level menu tree</h3>
+<ol>
+<li><code>Start sampling</code> (action -&gt; <code>cmd:startSampling</code>)</li>
+<li><code>Stop sampling</code> (action -&gt; <code>cmd:stopSampling</code>)</li>
+<li><code>Hibernate 10m</code> (action -&gt; <code>cmd:hibernate</code>)</li>
+<li><code>Setup</code> (submenu)</li>
+<li><code>Send config</code> (action -&gt; <code>cmd:getConfig</code>)</li>
+</ol>
+<h3 id="33-setup-submenu">3.3 Setup submenu</h3>
+<p>Numeric/select items:</p>
+<ol>
+<li><code>Sensor address</code> -&gt; <code>sensorAddress</code> options: <code>1..9</code></li>
+<li><code>Sensor baudrate</code> -&gt; <code>sensorBaudrate</code> options:</li>
+<li><code>1200, 4800, 9600, 19200, 38400, 57600, 115200</code></li>
+<li><code>Sensor warmup (ms)</code> -&gt; <code>sensorWarmupMs</code> options:</li>
+<li><code>500, 1000, 2000, 4000, 5000, 10000</code></li>
+<li><code>Sensor type</code> -&gt; <code>sensorType</code> options:</li>
+<li><code>0, 1, 2</code></li>
+<li><code>Sampling interval</code> -&gt; <code>samplingInterval</code> options:</li>
+<li><code>250, 500, 750, 1000, 2000, 5000, 10000</code></li>
+<li><code>Agg period (s)</code> -&gt; <code>aggPeriodS</code> options:</li>
+<li><code>10, 15, 20, 30, 60, 120, 300, 600</code></li>
+<li><code>Aware timeout (s)</code> -&gt; <code>awareTimeoutS</code> options:</li>
+<li><code>60, 300, 600, 900, 1800, 3600</code></li>
+<li><code>Default sleep (s)</code> -&gt; <code>defaultSleepS</code> options:</li>
+<li><code>600, 900, 1800, 3600</code></li>
+<li><code>Status interval (s)</code> -&gt; <code>statusIntervalS</code> options:</li>
+<li><code>60, 120, 300, 600, 900, 1800</code></li>
+<li><code>Max charge current</code> -&gt; <code>maxChargingCurrent</code> options:<ul>
+<li><code>250, 500, 750, 1000</code></li>
+</ul>
+</li>
+<li><code>Max charge volt</code> -&gt; <code>maxChargingVoltage</code> options:<ul>
+<li><code>3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2</code></li>
+</ul>
+</li>
+</ol>
+<p>Text editor items:</p>
+<ol>
+<li><code>Device name</code> -&gt; <code>deviceName</code> (maxLen 47)</li>
+<li><code>SIM pin</code> -&gt; <code>simPin</code> (maxLen 15)</li>
+<li><code>APN</code> -&gt; <code>apn</code> (maxLen 63)</li>
+<li><code>APN user</code> -&gt; <code>apnUser</code> (maxLen 31)</li>
+<li><code>APN pass</code> -&gt; <code>apnPass</code> (maxLen 31)</li>
+<li><code>MQTT host</code> -&gt; <code>mqttHost</code> (maxLen 63)</li>
+<li><code>MQTT user</code> -&gt; <code>mqttUser</code> (maxLen 31)</li>
+<li><code>MQTT pass</code> -&gt; <code>mqttPass</code> (maxLen 31)</li>
+<li><code>MQTT client id</code> -&gt; <code>mqttClientId</code> (maxLen 47)</li>
+</ol>
+<h3 id="34-text-editor-behavior-for-text-settings">3.4 Text editor behavior (for text settings)</h3>
+<ul>
+<li>Character grid includes:</li>
+<li>letters, digits, <code>.</code>, <code>-</code>, <code>_</code>, and space</li>
+<li>Command cells:</li>
+<li><code>&lt;</code> delete</li>
+<li><code>^</code> toggle case</li>
+<li><code>+</code> confirm/save</li>
+<li><code>x</code> cancel</li>
+<li>Trailing spaces are trimmed on save.</li>
+<li>Saved text updates local settings; it is not automatically pushed to backend.</li>
+</ul>
+<p>Note:</p>
+<ul>
+<li>The menu item label <code>Hibernate 10m</code> sends <code>cmd:hibernate</code> without <code>sleepSeconds</code>.</li>
+<li>Actual sleep duration then follows runtime setting <code>defaultSleepS</code> (unless command payload provides <code>sleepSeconds</code> from backend).</li>
+</ul>
+</body>
+</html>
