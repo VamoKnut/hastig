@@ -1,0 +1,18 @@
+D5 (J2-61) "left"
+D4 (J2-63) "up"
+D2 (J2-67) "down"
+D1 (J2-68) "right"
+GPIO0 (J2-46) - "up" (D4) for wake-up
+
+D3 (J2-65) Power switch
+D6 (J2-59) RX/TX switch RS485 (!RE, DE)
+
+D14 (J1-33 UART1 TX) RS-485 DI
+D13 (j1-35 UART1 RX) RS-485 RO
+
+D12 (J1-46 I2C0 SCL) Display SCL
+D11 (J1-44 I2C0 SDA) Display SDA
+
+Display Pwr +3V3, GND
+
+Pwr in VIN, GND
