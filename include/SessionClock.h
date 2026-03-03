@@ -25,6 +25,13 @@ public:
   void getSessionId(char* out, size_t outLen) const;
 
   /**
+   * @brief Get server-provided session id for current session, if any.
+   *
+   * @return true if current session was started with server session id.
+   */
+  bool getServerSessionId(char* out, size_t outLen) const;
+
+  /**
    * @brief Milliseconds since reference start.
    */
   uint32_t relMs() const;
@@ -33,6 +40,7 @@ private:
   mutable rtos::Mutex _mx;
   uint32_t            _refMs = 0;
   char                _sessionId[48] = {0};
+  bool                _hasServerSessionId = false;
 
   void generateLocalGuid(char* out, size_t outLen);
 };

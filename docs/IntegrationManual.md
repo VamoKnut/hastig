@@ -290,6 +290,8 @@ Mandatory keys:
 
 Optional keys:
 
+- `sessionID` (string)
+  - present when current sampling session was started with `startSampling` that included `sessionID`
 - `<k1>Avg` (float)
 - `<k1>Min` (float)
 - `<k1>Max` (float)

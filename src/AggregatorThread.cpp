@@ -167,6 +167,8 @@ void AggregatorThread::run()
       {
          continue;
       }
+      out.sessionId[0] = '\0';
+      (void)_clock.getServerSessionId(out.sessionId, sizeof(out.sessionId));
 
       if (!_commsEgress.sendAggregate(out))
       {

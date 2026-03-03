@@ -14,6 +14,7 @@ This version can host multiple virtual nodes in parallel over one MQTT connectio
 import argparse
 import json
 import math
+import os
 import signal
 import sys
 import time
@@ -150,10 +151,24 @@ def json_len_compact(doc: Dict[str, Any]) -> int:
     return len(json.dumps(doc, separators=(",", ":"), ensure_ascii=True))
 
 
+def build_device_id(node_index: int, name_prefix: str) -> str:
+    base = f"{node_index:024x}"
+    if not name_prefix:
+        return base
+
+    leading_zeros = len(base) - len(base.lstrip("0"))
+    if leading_zeros <= 0:
+        return base
+
+    replace_len = min(len(name_prefix), leading_zeros)
+    return name_prefix[:replace_len] + base[replace_len:]
+
+
 class VirtualNode:
     def __init__(
         self,
         node_index: int,
+        name_prefix: str,
         topic_prefix: str,
         cond_amplitude: float,
         cond_period_min: float,
@@ -162,7 +177,7 @@ class VirtualNode:
         verbose: bool,
     ) -> None:
         self.node_index = node_index
-        self.device_id = f"{node_index:024x}"
+        self.device_id = build_device_id(node_index, name_prefix)
         self.topic_prefix = topic_prefix
         self.topic_cmd = f"{topic_prefix}/{self.device_id}/cmd"
         self.topic_cfg = f"{topic_prefix}/{self.device_id}/cfg"
@@ -182,6 +197,7 @@ class VirtualNode:
 
         self.boot_ms = now_ms()
         self.session_start_ms = self.boot_ms
+        self.server_session_id: Optional[str] = None
 
         self.state = MODE_AWARE
         self.last_activity_ms = self.boot_ms
@@ -374,6 +390,8 @@ class VirtualNode:
             "n": int(self.agg_n),
             "ok": 1 if self.agg_ok else 0,
         }
+        if self.server_session_id:
+            payload["sessionID"] = self.server_session_id
 
         k0 = self.agg_k0 if self.agg_k0 else "cond"
         k1 = self.agg_k1 if self.agg_k1 else "temp"
@@ -625,8 +643,11 @@ class VirtualNode:
                 self.settings.agg_period_s = int(v)
             self.settings.clamp_runtime()
 
-            if isinstance(doc.get("sessionID"), str) and doc.get("sessionID"):
-                pass
+            cmd_session_id = doc.get("sessionID")
+            if isinstance(cmd_session_id, str) and cmd_session_id.strip():
+                self.server_session_id = cmd_session_id[:47]
+            else:
+                self.server_session_id = None
             self.session_start_ms = now_ms()
 
             self.enter_state(MODE_SAMPLING)
@@ -741,6 +762,7 @@ class Simulator:
         for i in range(1, args.nodes + 1):
             node = VirtualNode(
                 node_index=i,
+                name_prefix=args.name_prefix,
                 topic_prefix=args.topic_prefix,
                 cond_amplitude=args.cond_amplitude,
                 cond_period_min=args.cond_period_min,
@@ -766,6 +788,19 @@ class Simulator:
     def _log_mqtt_rx(self, topic: str, payload_text: str) -> None:
         node_id = self._extract_node_id_from_topic(topic)
         self.log(f"RX [{node_id}] {topic} {payload_text}")
+
+    @staticmethod
+    def _reason_text(reason_code: Any) -> str:
+        if reason_code is None:
+            return "unknown"
+        try:
+            numeric = int(reason_code)
+            text = str(reason_code)
+            if text != str(numeric):
+                return f"{text} ({numeric})"
+            return text
+        except Exception:
+            return str(reason_code)
 
     def stop(self, *_args: Any) -> None:
         self.running = False
@@ -799,10 +834,19 @@ class Simulator:
         reason_code: Any = 0,
         _properties: Any = None,
     ) -> None:
-        if reason_code == 0 and isinstance(_disconnect_flags, (int, str)):
+        if (reason_code is None or int(reason_code) == 0) and isinstance(_disconnect_flags, (int, str)):
             reason_code = _disconnect_flags
+
+        # During controlled shutdown we expect disconnect callback.
+        if not self.running:
+            self.connected = False
+            return
+
         self.connected = False
-        self.log(f"MQTT disconnected: rc={reason_code}")
+        reason_text = self._reason_text(reason_code)
+        self.log(f"MQTT disconnected: rc={reason_text}")
+        if "Unspecified error" in reason_text and self.args.client_id == "HastigPythonSimulator":
+            self.log("Hint: likely duplicate MQTT client-id. Start simulator with unique --client-id.")
 
     def on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
         topic = msg.topic if isinstance(msg.topic, str) else msg.topic.decode("utf-8", errors="ignore")
@@ -829,6 +873,8 @@ class Simulator:
         self.client.connect(self.args.broker, self.args.port, keepalive=self.args.keepalive)
 
     def try_reconnect(self) -> None:
+        if self.client.is_connected():
+            return
         now = now_ms()
         if now < self.next_reconnect_ms:
             return
@@ -842,18 +888,22 @@ class Simulator:
 
     def run(self) -> int:
         self.connect()
+        node_ids = list(self.nodes.keys())
+        first_id = node_ids[0] if node_ids else "-"
+        last_id = node_ids[-1] if node_ids else "-"
         self.log(
             f"Simulator started: nodes={self.args.nodes} "
-            f"id_range=000000000000000000000001..{self.args.nodes:024x} "
+            f"id_range={first_id}..{last_id} "
+            f"name_prefix={self.args.name_prefix!r} "
             f"cond_amp={self.args.cond_amplitude} cond_period_min={self.args.cond_period_min} temp={self.args.temperature}"
         )
 
         while self.running:
             rc = self.client.loop(timeout=0.01)
-            if rc != mqtt.MQTT_ERR_SUCCESS:
-                if self.args.verbose:
-                    self.log(f"loop rc={rc}")
+            if rc == mqtt.MQTT_ERR_NO_CONN:
                 self.try_reconnect()
+            elif rc != mqtt.MQTT_ERR_SUCCESS and self.args.verbose:
+                self.log(f"loop rc={rc}")
 
             tick_ms = now_ms()
             for node in self.nodes.values():
@@ -878,7 +928,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--keepalive", type=int, default=30, help="MQTT keepalive seconds")
 
     p.add_argument("--topic-prefix", default="hastigNode", help="MQTT topic prefix")
-    p.add_argument("--client-id", default="HastigPythonSimulator", help="MQTT client ID")
+    p.add_argument(
+        "--name-prefix",
+        default="",
+        help="Prefix replacing leading zeros in 24-char device id (length is preserved)",
+    )
+    default_client_id = f"HastigPythonSimulator-{os.getpid()}"
+    p.add_argument("--client-id", default=default_client_id, help="MQTT client ID")
     p.add_argument("--qos", type=int, choices=[0, 1], default=0, help="MQTT QoS")
     p.add_argument("--retain", action="store_true", help="Publish retained messages")
 
@@ -918,6 +974,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--cond-period-min must be > 0")
     if args.tick_ms < 1:
         raise SystemExit("--tick-ms must be >= 1")
+    if "/" in args.name_prefix:
+        raise SystemExit("--name-prefix must not contain '/'")
 
 
 def main() -> int:

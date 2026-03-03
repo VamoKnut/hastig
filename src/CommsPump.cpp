@@ -399,6 +399,9 @@ bool CommsPump::publishAggregate(const AggregateMsg& a)
   doc["t1"] = a.rel_end_ms;
   doc["n"]  = a.n;
   doc["ok"] = a.ok ? 1 : 0;
+  if (a.sessionId[0] != '\0') {
+    doc["sessionID"] = a.sessionId;
+  }
 
   char k[16];
   snprintf(k, sizeof(k), "%sAvg", a.k0);

@@ -29,6 +29,7 @@ struct SensorSampleMsg {
 struct AggregateMsg {
   uint32_t rel_start_ms;
   uint32_t rel_end_ms;
+  char     sessionId[48];
 
   char  k0[8];
   float v0_avg;

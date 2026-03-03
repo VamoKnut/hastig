@@ -7,7 +7,7 @@
 /**
  * @brief Hastig compile-time configuration.
  */
-static constexpr const char* HASTIG_AI_REVISION = "v134";
+static constexpr const char* HASTIG_AI_REVISION = "v135";
 
 // ---------------- Pins ----------------
 static constexpr int PIN_BTN_LEFT  = D5;

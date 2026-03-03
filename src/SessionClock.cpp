@@ -26,6 +26,7 @@ void SessionClock::begin()
   _refMs = timeutil::nowMs();
   strncpy(_sessionId, "none", sizeof(_sessionId));
   _sessionId[sizeof(_sessionId) - 1] = '\0';
+  _hasServerSessionId = false;
 }
 
 /**
@@ -40,8 +41,10 @@ void SessionClock::startNewSession(const char* serverSessionIdOrNull)
   if (serverSessionIdOrNull != nullptr && serverSessionIdOrNull[0] != '\0') {
     strncpy(_sessionId, serverSessionIdOrNull, sizeof(_sessionId));
     _sessionId[sizeof(_sessionId) - 1] = '\0';
+    _hasServerSessionId = true;
   } else {
     generateLocalGuid(_sessionId, sizeof(_sessionId));
+    _hasServerSessionId = false;
   }
 }
 
@@ -56,6 +59,23 @@ void SessionClock::getSessionId(char* out, size_t outLen) const
   }
   strncpy(out, _sessionId, outLen);
   out[outLen - 1] = '\0';
+}
+
+bool SessionClock::getServerSessionId(char* out, size_t outLen) const
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  if (outLen == 0) {
+    return false;
+  }
+
+  if (!_hasServerSessionId) {
+    out[0] = '\0';
+    return false;
+  }
+
+  strncpy(out, _sessionId, outLen);
+  out[outLen - 1] = '\0';
+  return true;
 }
 
 /**
