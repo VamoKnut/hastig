@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "../HastigPoC"
+		},
+		{
+			"name": "C33 Explorer Arduino KMM",
+			"path": "../../Users/Knut/Documents/PlatformIO/Projects/C33 Explorer Arduino KMM"
+		},
+		{
+			"name": "Co2Monitor",
+			"path": "../Co2Monitor"
+		},
+		{
+			"path": "../H7-mbed-explorer"
+		},
+		{
+			"path": "."
+		}
+	],
+	"settings": {}
+}

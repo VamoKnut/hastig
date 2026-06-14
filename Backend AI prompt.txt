@@ -1,15 +1,202 @@
 I want to prototype a full-stack application called "HASTIG"
-The purpose is to perform water discharge measurements using salt dilution method. The system will use remote, lowpower IoT nodes ("sensor nodes") in rivers to measure conductivity.
+The purpose is to perform water discharge measurements using salt dilution method. The system will use remote, lowpower IoT nodes ("sensor nodes") in rivers to measure conductivity primarily and also water level.
 
-The backend will communicate with the sensor nodes using MQTT. THe web ui will consist of two parts. One mamangement part or "dashbord" used by 
-hydrologist to define "projects", assign equipment and personel to projects and assign location data to such objects. The second part will be used by persons in the field ("Care takers"), to orchestrate 
-the injection of salt at specific sites.
+The backend will communicate with the sensor nodes using MQTT. The web ui will consist of two parts. One manangement part or "dashbord" used by 
+hydrologist to define "projects", assign equipment and personel to projects and assign location data to such objects We will call this part of the HASTIG framework "dashboard" for now. The second part will be used by persons in the field ("Care takers"), to orchestrate 
+the injection of salt at specific sites and coordinate the work-flow of the backend. This second part should look and feel as a native app, but be implemented as a PWA with notification functionality. We will call
+this part of the HASTIG framwork for "app" for now. A care taker need to use the app to create a user identity (Based on google authentication). When a care taker has created an known idntity within the HASTIG framweork, he/she will be an available "resource"
 
 Well use the term "project" for the setting up of a site, consisting of one or more sensors (hardware at a specific location), care takers (one or more persons actually injecting salt in the river) and drop-sites 
 (basically coordinates with a name and decription that will be used for individual gaugings). We will indicate for care takers how much salt they are expected to inject for each gauging in advance.
 
 All activity, planning, settings and results for one specific gauging is contained in a "campaign". A campaign has a life cycle containing the following stages:
 1) planning. The Hydrologist (or future automatic forecasting sub-system) see the need for a guaging at a location. The hydrologist will indicate a timeframe (earliest and latest time of the gauging) for the 
-gauging to be performed. This desition is based on en estimation of upcomming discharge of interest.
-2) Notifying care-takers. When a campaign is planned, the care-takers assigned to the proejct will be notified of the need of their service.
-0050002A3330510C38363436
+gauging to be performed. This decision is based on en estimation of an upcomming water discharge of interest.
+2) Notifying care-takers. When a campaign is planned, the care-takers assigned to the project will be notified of the need of their service.
+3) One care-taker will indicate usin the app that he/she will take on the assignment.
+4) at some interval prior to the acttual intended time of gauging, the backend make sure the nodes in the project are kept active. The work-flow  of this will be detailed later.
+5) the care taker arrives at the site and indicates via the app that he is at site. 
+6) the backend start measuring background conductivity and water level
+7) When a good background conductivity level (baseline) is established, the backend intructs the care taker to inject salt. the nodes are instructed to keep sampling, but the collected data will now 
+go into a storage of data that will later be used to calculate discharge. Internally, I suggest that samples are kept as a continious timeserie, where only indexes or timestamp is used to disintnguish the different
+usedcasd of dta (i.e. "background conducitivt samples from t0 to t1, sampling periode t1 to t2 and so on)
+8) the care taker confirmes in the app that salt has been injected. The care taker must have the ability to override the amount of salt injected, thus the confirmation involves entering the actual 
+amount of salt injected in kg.
+9) the app says a polite and humble "thank you" to the care taker and tells him to go safely home and thanks him for his service.
+10) the backend continues to sample conductivity until a clear increase and decrease in conductivity indicates that the salt wave has passed the sensor. The behaviour of the conductivity as a function of 
+time resembles a log-normal distibution. We need to define come criteria for whatn to stop sampling and calculate discharge. In genral, the conductivity should be close to the baseline and the trend line should
+be almost flat.
+11) all data related to this campaign should be stored and the active phase of the campaign ended.
+12) at som stage, an hydrologist will use the dashboard to quality assure the gaguing within a campaign, potentially override parameters, edit conductivity samples and then lock down the result as QA approved.
+
+we should fasilitate an rest API to extract projects, campaigns and gaugings to third-party systems.
+We need functionality in te dashboard to export the result of all gaugind in a project as downloadable csv files. 
+
+Ideally, there should be a consept of "organization" above the project level. Normally, a project belongs to one organization and differnt organizations does not have access to each others projects. Still a 
+projects can be shared between organizations, either as Read-Only or full access.
+We need a framwork to define organizations, and add users to organizations. We need a "System owner" role to handle the bootstrap process. 
+
+When a node awakes, it sends a status mesage to the mqtt broker. The topic contains the nodeID. If a nodeID is unkown, the node should be addded to a resource pool for later use in a 
+project. it should be possible for members/users of an organization to clame "ownership" of nodes even if they are not assigned to a project, thus grab them and hide this node from other organizations.
+There is also need for functionaolity to release ownership of nodes that are not assigned to a project, thus return to a common resource pool. System owner should be able to 
+release nodes regardless of ownership and use.
+
+The UI of dashboard should be compact. I would prefere a visual style similar to Windows file explorer, with a tree structure on the left with projects, campaigns. resorces etc,
+and properties and settings of these entities on the right.
+The app should be optimized of field use under possibly both sunny conditions (bad screen visability) and rain and cold weather (large easy-to-hit buttons and UI elements)
+
+I want to iterate on a potential data model and structure before generating code to refine this early on ,as I have a clear mental model of how this should be structured. 
+
+AI generated prompt to explain the technical use of IoT nodes:
+
+Role
+You are an AI agent that orchestrates sampling on a HASTIG node via MQTT. Your job is to
+start/stop sampling sessions, keep the node awake when needed, and ingest status + data
+messages. The node is battery powered and operates in three modes: aware, sampling,
+hibernating.
+
+MQTT Topic Scheme
+Topics are built as: <prefix>/<nodeId>/<postfix>
+Prefix: hastigNode
+nodeId: device name (deviceName setting). If blank, the node uses its hardware ID.
+
+Inbound (agent publishes to node):
+- hastigNode/<nodeId>/cmd
+- hastigNode/<nodeId>/cfg
+
+Outbound (agent subscribes from node):
+- hastigNode/<nodeId>/status
+- hastigNode/<nodeId>/data
+
+Commands (publish to /cmd)
+All commands use JSON with camelCase keys and a "type" field.
+
+Start sampling:
+{"type":"startSampling","samplingInterval":1000,"aggPeriodS":15,"sessionID":"<optional>"}
+Notes:
+- samplingInterval is in ms. The node clamps to a minimum of 200 ms.
+- aggPeriodS is in seconds.
+- sessionID is optional; if omitted the node generates one.
+
+Stop sampling:
+{"type":"stopSampling"}
+
+Keep sampling (heartbeat/ack):
+{"type":"keepSampling"}
+Use this regularly while sampling to avoid the node falling back to aware mode.
+
+Hibernate (deep sleep):
+{"type":"hibernate","sleepSeconds":3600}
+sleepSeconds is optional; if omitted, the node uses its defaultSleepS.
+The node clamps to its maxForcedSleepS.
+
+Get config snapshot:
+{"type":"getConfig"}
+
+Nudge (keep aware without other action):
+{"type":"nudge"}
+
+Reset battery statistics:
+{"type":"resetBatteryStatistics"}
+
+Factory reset:
+{"type":"factoryReset"}
+
+Configuration Updates (publish to /cfg)
+The /cfg topic applies settings immediately and persists them.
+Send a JSON patch with any of these keys (camelCase):
+- sensorAddress (uint)
+- sensorBaudrate (uint)
+- sensorWarmupMs (uint)
+- sensorType (uint: 0=fake, 1=seametricsCT2X, 2=PT12)
+- samplingInterval (uint, ms)
+- aggPeriodS (uint, s)
+- mqttHost, mqttPort, mqttUser, mqttPass, mqttClientId
+- deviceName
+- awareTimeoutS, defaultSleepS, statusIntervalS
+- lowBattMinV
+- maxChargingCurrent, maxChargingVoltage
+- emergencyDelayS, emergencySleepS
+- maxForcedSleepS, maxUnackedPackets
+
+Examples:
+{"samplingInterval":500,"aggPeriodS":10}
+{"deviceName":"RiverNode-01"}
+
+Status Messages (node publishes to /status)
+The node publishes:
+1) status
+2) modeChange
+3) config / configChunk
+4) alert
+
+Status:
+{
+  "type":"status",
+  "tsMs":123456,
+  "mode":"aware|sampling|hibernating",
+  "batteryVoltage":3.72,
+  "minimumVoltage":3.10,
+  "batteryCurrent":12.5,
+  "averageCurrent":8.4,
+  "reason":"inactivity|forced|emergencyPowerSave|noNetwork",
+  "expectedDuration":3600
+}
+Notes:
+- reason/expectedDuration are included when hibernating.
+
+Mode change:
+{"type":"modeChange","mode":"sampling","previousMode":"aware"}
+If hibernating:
+{"type":"modeChange","mode":"hibernating","previousMode":"sampling","reason":"forced","expectedDuration":3600}
+
+Config snapshot:
+{"type":"config", ...}
+If too large, the node sends chunks:
+{"type":"configChunk","chunk":1,"total":5,"section":"mqtt", ...}
+
+Alert (low battery):
+{"type":"alert","message":"Critically low battery detected. Emergency hibernate soon.","mode":"aware","minimumVoltage":2.75}
+
+Data Messages (node publishes to /data)
+{
+  "type":"data",
+  "t0":0,
+  "t1":15000,
+  "n":15,
+  "ok":1,
+  "sessionID":"<optional>",
+  "<k0>Avg":123.45,
+  "<k0>Min":120.10,
+  "<k0>Max":126.30,
+  "<k1>Avg":9.8,
+  "<k1>Min":9.6,
+  "<k1>Max":10.1
+}
+Notes:
+- t0/t1 are milliseconds relative to session start.
+- k0/k1 depend on sensor type:
+  - seametricsCT2X: k0="cond", k1="temp"
+  - PT12: k0="level", k1="temp"
+  - fake: k0="cond", k1="temp"
+
+Node State Behavior
+Aware:
+- Node connects to MQTT and waits for commands.
+- If no activity for awareTimeoutS, it hibernates for defaultSleepS.
+- If MQTT never comes up within 120 seconds, it hibernates for 900 seconds (reason "noNetwork").
+
+Sampling:
+- Continuous sampling + aggregation; publishes data to /data.
+- The agent must send keepSampling regularly; otherwise, the node returns to aware
+  after maxUnackedPackets aggregates (default 10).
+
+Hibernating:
+- Node is in deep sleep; no MQTT.
+- Upon wake, it returns to aware and publishes status.
+
+Agent Rules
+- Use /cmd for actions and /cfg for configuration changes.
+- Always use camelCase JSON keys.
+- While sampling, send keepSampling on every aggregate or at least every few seconds.
+- Handle status/config/alert messages from /status and data from /data.

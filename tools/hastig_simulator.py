@@ -15,8 +15,11 @@ import argparse
 import json
 import math
 import os
+import queue
+import random
 import signal
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -35,6 +38,15 @@ CONFIG_CHUNK_TOTAL = 5
 MODE_AWARE = "aware"
 MODE_SAMPLING = "sampling"
 MODE_HIBERNATING = "hibernating"
+
+COND_MODE_CONSTANT = "constant"
+COND_MODE_BELL = "bell"
+COND_NOISE_RATIO = 0.02
+
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
 
 
 def now_ms() -> int:
@@ -170,8 +182,9 @@ class VirtualNode:
         node_index: int,
         name_prefix: str,
         topic_prefix: str,
+        cond_baseline: float,
         cond_amplitude: float,
-        cond_period_min: float,
+        cond_duration_min: float,
         fixed_temp: float,
         publish_fn,
         verbose: bool,
@@ -191,9 +204,12 @@ class VirtualNode:
         self.settings.device_name = ""
         self.settings.clamp_runtime()
 
+        self.cond_baseline = max(0.0, cond_baseline)
         self.cond_amplitude = max(0.0, cond_amplitude)
-        self.cond_period_ms = max(1.0, cond_period_min * 60.0 * 1000.0)
+        self.cond_duration_ms = max(1.0, cond_duration_min * 60.0 * 1000.0)
         self.fixed_temp = fixed_temp
+        self.cond_mode = COND_MODE_CONSTANT
+        self.cond_bell_start_ms: Optional[int] = None
 
         self.boot_ms = now_ms()
         self.session_start_ms = self.boot_ms
@@ -237,6 +253,32 @@ class VirtualNode:
 
     def publish_json(self, topic: str, payload: Dict[str, Any]) -> None:
         self._publish_fn(topic, payload)
+
+    def cond_mode_description(self) -> str:
+        if self.cond_mode == COND_MODE_CONSTANT:
+            return f"{COND_MODE_CONSTANT} baseline={self.cond_baseline:.3f} noise={COND_NOISE_RATIO * 100.0:.1f}%"
+        peak = self.cond_baseline + self.cond_amplitude
+        return (
+            f"{COND_MODE_BELL} baseline={self.cond_baseline:.3f} "
+            f"peak={peak:.3f} duration_min={self.cond_duration_ms / 60000.0:.3f}"
+        )
+
+    def set_cond_mode(self, mode: str, wall_ms: Optional[int] = None) -> None:
+        if wall_ms is None:
+            wall_ms = now_ms()
+
+        if mode == COND_MODE_BELL:
+            self.cond_mode = COND_MODE_BELL
+            self.cond_bell_start_ms = wall_ms
+        else:
+            self.cond_mode = COND_MODE_CONSTANT
+            self.cond_bell_start_ms = None
+
+        self.log(f"conductivity mode -> {self.cond_mode_description()}")
+
+    def toggle_cond_mode(self, wall_ms: Optional[int] = None) -> None:
+        next_mode = COND_MODE_BELL if self.cond_mode == COND_MODE_CONSTANT else COND_MODE_CONSTANT
+        self.set_cond_mode(next_mode, wall_ms)
 
     def publish_status(self, mode: str, extra: Optional[Dict[str, Any]] = None) -> None:
         doc: Dict[str, Any] = {
@@ -344,9 +386,20 @@ class VirtualNode:
 
     def fake_sensor_sample(self, wall_ms: int) -> Dict[str, Any]:
         t_rel = self.rel_ms(wall_ms)
-        phase = 2.0 * math.pi * (float(t_rel) / self.cond_period_ms)
-        cond = self.cond_amplitude + (self.cond_amplitude * math.cos(phase))
-        cond = max(0.0, cond)
+        if self.cond_mode == COND_MODE_CONSTANT:
+            noise = self.cond_baseline * COND_NOISE_RATIO * random.uniform(-1.0, 1.0)
+            cond = max(0.0, self.cond_baseline + noise)
+        elif self.cond_bell_start_ms is not None:
+            elapsed_ms = max(0.0, float(wall_ms - self.cond_bell_start_ms))
+            if elapsed_ms < self.cond_duration_ms:
+                # Raised cosine: baseline -> peak -> baseline over one shot.
+                phase = 2.0 * math.pi * (elapsed_ms / self.cond_duration_ms)
+                cond = self.cond_baseline + (self.cond_amplitude * 0.5 * (1.0 - math.cos(phase)))
+            else:
+                cond = self.cond_baseline
+        else:
+            cond = self.cond_baseline
+
         temp = self.fixed_temp
         return {
             "relMs": t_rel,
@@ -738,6 +791,8 @@ class Simulator:
         self.running = True
         self.connected = False
         self.next_reconnect_ms = 0
+        self.console_keys: "queue.SimpleQueue[str]" = queue.SimpleQueue()
+        self.console_thread: Optional[threading.Thread] = None
 
         try:
             self.client = mqtt.Client(
@@ -764,8 +819,9 @@ class Simulator:
                 node_index=i,
                 name_prefix=args.name_prefix,
                 topic_prefix=args.topic_prefix,
+                cond_baseline=args.cond_baseline,
                 cond_amplitude=args.cond_amplitude,
-                cond_period_min=args.cond_period_min,
+                cond_duration_min=args.cond_duration_min,
                 fixed_temp=args.temperature,
                 publish_fn=self.publish_json,
                 verbose=args.verbose,
@@ -804,6 +860,54 @@ class Simulator:
 
     def stop(self, *_args: Any) -> None:
         self.running = False
+
+    def start_console_listener(self) -> None:
+        if msvcrt is None:
+            self.log("Console key listener disabled: this platform does not support msvcrt")
+            return
+        if self.console_thread is not None:
+            return
+
+        self.console_thread = threading.Thread(target=self._console_key_reader, name="console-key-reader", daemon=True)
+        self.console_thread.start()
+
+    def _console_key_reader(self) -> None:
+        while self.running:
+            try:
+                ch = msvcrt.getwch()
+            except OSError:
+                break
+
+            if not self.running:
+                break
+            if ch in ("\x00", "\xe0"):
+                try:
+                    msvcrt.getwch()
+                except OSError:
+                    break
+                continue
+
+            self.console_keys.put(ch.lower())
+
+    def handle_console_keys(self) -> None:
+        while True:
+            try:
+                key = self.console_keys.get_nowait()
+            except queue.Empty:
+                return
+
+            if key == "q":
+                self.log("Console command: quit requested")
+                self.stop()
+                return
+
+            if key == "t":
+                wall_ms = now_ms()
+                for node in self.nodes.values():
+                    node.toggle_cond_mode(wall_ms)
+                first_node = next(iter(self.nodes.values()), None)
+                if first_node is not None:
+                    self.log(f"Console command: toggled conductivity mode -> {first_node.cond_mode_description()}")
 
     def publish_json(self, topic: str, payload: Dict[str, Any]) -> None:
         raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
@@ -888,6 +992,7 @@ class Simulator:
 
     def run(self) -> int:
         self.connect()
+        self.start_console_listener()
         node_ids = list(self.nodes.keys())
         first_id = node_ids[0] if node_ids else "-"
         last_id = node_ids[-1] if node_ids else "-"
@@ -895,8 +1000,12 @@ class Simulator:
             f"Simulator started: nodes={self.args.nodes} "
             f"id_range={first_id}..{last_id} "
             f"name_prefix={self.args.name_prefix!r} "
-            f"cond_amp={self.args.cond_amplitude} cond_period_min={self.args.cond_period_min} temp={self.args.temperature}"
+            f"cond_baseline={self.args.cond_baseline} "
+            f"cond_amp={self.args.cond_amplitude} "
+            f"cond_duration_min={self.args.cond_duration_min} "
+            f"temp={self.args.temperature}"
         )
+        self.log("Console controls: press 't' to toggle conductivity mode, 'q' to quit")
 
         while self.running:
             rc = self.client.loop(timeout=0.01)
@@ -904,6 +1013,8 @@ class Simulator:
                 self.try_reconnect()
             elif rc != mqtt.MQTT_ERR_SUCCESS and self.args.verbose:
                 self.log(f"loop rc={rc}")
+
+            self.handle_console_keys()
 
             tick_ms = now_ms()
             for node in self.nodes.values():
@@ -941,16 +1052,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--nodes", type=int, default=1, help="Number of virtual nodes to simulate in parallel")
 
     p.add_argument(
+        "--cond-baseline",
+        type=float,
+        default=1.0,
+        help="Baseline conductivity used in constant mode and before/after the bell event",
+    )
+    p.add_argument(
         "--cond-amplitude",
         type=float,
         default=1.0,
-        help="Conductivity cosine amplitude (always positive waveform)",
+        help="Conductivity increase above baseline reached at the bell peak",
     )
     p.add_argument(
+        "--cond-duration-min",
         "--cond-period-min",
+        dest="cond_duration_min",
         type=float,
         default=10.0,
-        help="Conductivity cosine period in minutes",
+        help="Minutes from bell start until the conductivity returns to baseline",
     )
     p.add_argument(
         "--temperature",
@@ -968,10 +1087,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def validate_args(args: argparse.Namespace) -> None:
     if args.nodes < 1:
         raise SystemExit("--nodes must be >= 1")
+    if args.cond_baseline < 0.0:
+        raise SystemExit("--cond-baseline must be >= 0")
     if args.cond_amplitude < 0.0:
         raise SystemExit("--cond-amplitude must be >= 0")
-    if args.cond_period_min <= 0.0:
-        raise SystemExit("--cond-period-min must be > 0")
+    if args.cond_duration_min <= 0.0:
+        raise SystemExit("--cond-duration-min must be > 0")
     if args.tick_ms < 1:
         raise SystemExit("--tick-ms must be >= 1")
     if "/" in args.name_prefix:
