@@ -85,6 +85,10 @@ void setup()
   sysCtx.sessionClock.begin();
 
   restartReason.begin();
+  const RestartReasonCode lastRestartReason = restartReason.read();
+  LOGI(TAG, "Last restart reason: %s (bootCount=%lu)",
+       RestartReasonStore::toString(lastRestartReason),
+       (unsigned long)restartReason.bootCount());
   // Mark startup as unexpected reboot until we perform a controlled hibernate.
   restartReason.write(RestartReasonCode::UnexpectedReboot);
 

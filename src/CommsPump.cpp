@@ -473,6 +473,16 @@ void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
  */
 void CommsPump::loopOnce()
 {
+  if (!_hibernatePending && _wantConnected &&
+      (timeutil::nowMs() - _bootMs) < HASTIG_COMMS_READY_GRACE_MS) {
+    if (!_bootGraceLogged) {
+      LOGI(TAG, "Deferring comms bring-up for %lu ms after boot",
+           (unsigned long)HASTIG_COMMS_READY_GRACE_MS);
+      _bootGraceLogged = true;
+    }
+    return;
+  }
+
   // Drain orchestrator commands
   while (true) {
     OrchCommandMsg* cmd = _inbox.tryGetOrch();

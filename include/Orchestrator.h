@@ -11,6 +11,7 @@ class SamplingThread;
 class AggregatorThread;
 class PowerManager;
 class RuntimeStatus;
+class RestartReasonStore;
 struct UiEventMsg;
 
 
@@ -34,7 +35,8 @@ public:
                SamplingThread& sensor,
                AggregatorThread& agg,
                PowerManager& powerManager,
-               RuntimeStatus& runtimeStatus);
+               RuntimeStatus& runtimeStatus,
+               RestartReasonStore& restartReason);
 
   /**
    * @brief Start orchestrator RTOS thread.
@@ -56,6 +58,7 @@ private:
   AggregatorThread& _agg;
   PowerManager&     _powerManager;
   RuntimeStatus&    _runtimeStatus;
+  RestartReasonStore& _restartReason;
 
   rtos::Thread _thread;
 
@@ -77,6 +80,7 @@ private:
 
   bool     _emergencyArmed = false;
   uint32_t _emergencyAtMs  = 0;
+  bool     _bootModeChangePublished = false;
 
   static void threadEntry(void* ctx);
   void run();

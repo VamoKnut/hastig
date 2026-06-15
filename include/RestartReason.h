@@ -3,19 +3,18 @@
 #include <stdint.h>
 
 /**
- * @brief Restart reason codes stored across hibernate using battery-backed domain.
- *
- * Implementation note:
- * On Portenta H7 this should be backed by RTC backup registers.
- * For now we provide a thin abstraction with a stub backend that can be replaced.
+ * @brief Restart reason codes stored across resets using the RTC backup domain.
  */
 enum class RestartReasonCode : uint32_t {
+  Unknown              = 0,
   UnexpectedReboot     = 1,
   LowPowerWakeup       = 2,
   NoNetwork            = 3,
   Forced               = 4,
   EmergencyPowerSave   = 5,
   BrownOut             = 6,
+  WatchdogReset        = 7,
+  ColdReboot           = 8,
 };
 
 /**
@@ -26,9 +25,19 @@ public:
   /** @brief Initialize backend. */
   void begin();
 
-  /** @brief Read last stored reason. */
+  /** @brief Read the reason classified during begin(). */
   RestartReasonCode read() const;
 
-  /** @brief Write reason to persistent storage. */
+  /** @brief Write the expected reason for the next boot. */
   void write(RestartReasonCode code) const;
+
+  /** @brief Number of valid boots seen by this store. */
+  uint32_t bootCount() const;
+
+  /** @brief Human-readable name for logging and status payloads. */
+  static const char* toString(RestartReasonCode code);
+
+private:
+  RestartReasonCode _lastReason = RestartReasonCode::Unknown;
+  uint32_t          _bootCount = 0;
 };

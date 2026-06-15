@@ -9,6 +9,7 @@
 #include "AggregatorThread.h"
 #include "PowerManager.h"
 #include "RuntimeStatus.h"
+#include "RestartReason.h"
 #include "BoardHal.h"
 #include "HastigGlobals.h"
 
@@ -85,6 +86,11 @@ bool setupPropIsNumeric(const char* prop)
          strcmp(prop, "maxForcedSleepS") == 0 ||
          strcmp(prop, "maxUnackedPackets") == 0;
 }
+
+const char* previousModeFromRestartReason(RestartReasonCode code)
+{
+  return (code == RestartReasonCode::LowPowerWakeup) ? "hibernate" : "unknown";
+}
 } // namespace
 
 /**
@@ -97,7 +103,8 @@ Orchestrator::Orchestrator(EventBus& eventBus,
                            SamplingThread& sensor,
                            AggregatorThread& agg,
                            PowerManager& powerManager,
-                           RuntimeStatus& runtimeStatus)
+                           RuntimeStatus& runtimeStatus,
+                           RestartReasonStore& restartReason)
     : _eventBus(eventBus),
       _commsEgress(commsEgress),
       _settings(settings),
@@ -106,6 +113,7 @@ Orchestrator::Orchestrator(EventBus& eventBus,
       _agg(agg),
       _powerManager(powerManager),
       _runtimeStatus(runtimeStatus),
+      _restartReason(restartReason),
       _thread(PRIO_ORCH, STACK_ORCH, nullptr, "Orch")
 {
 }
@@ -182,7 +190,13 @@ void Orchestrator::enterState(State s)
 
     _lastAckMs   = 0;
     _unackedAggregateCount = 0;
-    if (isModeChange) {
+    if (!_bootModeChangePublished) {
+      const RestartReasonCode reason = _restartReason.read();
+      _commsEgress.publishModeChange("aware",
+                                     previousModeFromRestartReason(reason),
+                                     RestartReasonStore::toString(reason));
+      _bootModeChangePublished = true;
+    } else if (isModeChange) {
       _commsEgress.publishModeChange("aware", previousMode);
     } else {
       _commsEgress.publishAwake();

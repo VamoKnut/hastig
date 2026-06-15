@@ -66,7 +66,7 @@ struct SystemContext {
         powerManager(board, rrStore, commsPump, uiThread, aggThread, samplingThread,
                      wakePin),
         orchestrator(eventBus, commsEgress, settings, sessionClock, samplingThread, aggThread,
-                     powerManager, runtimeStatus)
+                     powerManager, runtimeStatus, rrStore)
   {
   }
 };

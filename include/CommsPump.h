@@ -78,6 +78,7 @@ private:
   uint32_t _mqttFailCount = 0;
 
   uint32_t _bootMs = 0;
+  bool     _bootGraceLogged = false;
 
   char _topicCmd[96]    = {0};
   char _topicCfg[96]    = {0};

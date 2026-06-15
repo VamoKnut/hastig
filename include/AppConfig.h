@@ -7,7 +7,7 @@
 /**
  * @brief Hastig compile-time configuration.
  */
-static constexpr const char* HASTIG_AI_REVISION = "v135";
+static constexpr const char* HASTIG_AI_REVISION = "v148";
 
 // ---------------- Pins ----------------
 static constexpr int PIN_BTN_LEFT  = D5;
@@ -55,6 +55,6 @@ static constexpr uint32_t MIN_SAMPLE_PERIOD_MS = 200;
 // Grace time after publishing final status before hibernate.
 static constexpr uint32_t HIBERNATE_STATUS_GRACE_MS = 1500;
 // Comms boot gating
-static constexpr uint32_t HASTIG_COMMS_READY_GRACE_MS = 30000UL;
+static constexpr uint32_t HASTIG_COMMS_READY_GRACE_MS = 10000UL;
 static constexpr uint32_t HASTIG_MQTT_CONNECT_TIMEOUT_MS = 120000UL;
 static constexpr uint32_t HASTIG_NO_NETWORK_HIBERNATE_S = 900UL;

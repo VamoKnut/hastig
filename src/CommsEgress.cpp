@@ -18,6 +18,28 @@ static bool sendOrchCommand(CommandBus& bus, OrchCommandType type, const char* p
   return bus.sendToComms(type, payloadOrNull);
 }
 
+static bool sendJsonCommand(CommandBus& bus, OrchCommandType type, const JsonDocument& doc,
+                            char* out, size_t outSize)
+{
+  if (out == nullptr || outSize == 0u) {
+    return false;
+  }
+
+  const size_t expectedBytes = measureJson(doc);
+  if (expectedBytes >= outSize) {
+    LOGW(TAG, "JSON command too large (%u bytes, buf=%u)", (unsigned)expectedBytes, (unsigned)outSize);
+    return false;
+  }
+
+  const size_t n = serializeJson(doc, out, outSize);
+  if (n == 0 || n >= outSize) {
+    LOGW(TAG, "JSON command serialize failed/truncated (%u bytes, buf=%u)", (unsigned)n, (unsigned)outSize);
+    return false;
+  }
+  out[n] = '\0';
+  return sendOrchCommand(bus, type, out);
+}
+
 CommsEgress::CommsEgress(CommandBus& commandBus, AggMailT& aggToCommsMail)
     : _commandBus(commandBus), _aggToCommsMail(aggToCommsMail)
 {
@@ -36,23 +58,25 @@ bool CommsEgress::sendAggregate(const AggregateMsg& msg)
   return true;
 }
 
-bool CommsEgress::publishModeChange(const char* mode, const char* previousMode)
+bool CommsEgress::publishModeChange(const char* mode, const char* previousMode, const char* reason)
 {
   JsonDocument st;
   st["type"]         = "modeChange";
   st["previousMode"] = previousMode;
+  if (reason != nullptr && reason[0] != '\0') {
+    st["reason"] = reason;
+  }
 
   if (mode != nullptr && mode[0] != '\0') {
     st["mode"] = mode;
   }
 
   char out[256];
-  serializeJson(st, out, sizeof(out));
+  const OrchCommandType type = (mode != nullptr && strcmp(mode, "hibernating") == 0)
+                                   ? OrchCommandType::PublishHibernating
+                                   : OrchCommandType::PublishAwake;
 
-  if (mode != nullptr && strcmp(mode, "hibernating") == 0) {
-    return sendOrchCommand(_commandBus, OrchCommandType::PublishHibernating, out);
-  }
-  return sendOrchCommand(_commandBus, OrchCommandType::PublishAwake, out);
+  return sendJsonCommand(_commandBus, type, st, out, sizeof(out));
 }
 
 bool CommsEgress::publishStatus(const BoardHal::BatterySnapshot& bs, const char* mode)
@@ -67,8 +91,7 @@ bool CommsEgress::publishStatus(const BoardHal::BatterySnapshot& bs, const char*
   st["averageCurrent"] = bs.averageCurrent;
 
   char out[384];
-  serializeJson(st, out, sizeof(out));
-  return publishAwakeJson(out);
+  return sendJsonCommand(_commandBus, OrchCommandType::PublishAwake, st, out, sizeof(out));
 }
 
 bool CommsEgress::publishLowBatteryAlert(const BoardHal::BatterySnapshot& bs, const char* mode)
@@ -80,8 +103,7 @@ bool CommsEgress::publishLowBatteryAlert(const BoardHal::BatterySnapshot& bs, co
   warn["minimumVoltage"] = bs.minimumVoltage;
 
   char out[256];
-  serializeJson(warn, out, sizeof(out));
-  return publishAwakeJson(out);
+  return sendJsonCommand(_commandBus, OrchCommandType::PublishAwake, warn, out, sizeof(out));
 }
 
 bool CommsEgress::publishAwake()
@@ -126,6 +148,5 @@ bool CommsEgress::publishHibernateModeChange(const char* previousMode, const cha
   st["expectedDuration"] = expectedDurationS;
 
   char out[256];
-  serializeJson(st, out, sizeof(out));
-  return publishHibernatingJson(out);
+  return sendJsonCommand(_commandBus, OrchCommandType::PublishHibernating, st, out, sizeof(out));
 }
