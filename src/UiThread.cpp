@@ -15,6 +15,24 @@ using namespace std::chrono;
 
 static const char* TAG = "UI";
 
+namespace {
+BoardHal::Button toApplicationButton(BoardHal::Button physicalButton)
+{
+  switch (physicalButton) {
+    case BoardHal::Button::Left:
+      return BoardHal::Button::Right;
+    case BoardHal::Button::Right:
+      return BoardHal::Button::Left;
+    case BoardHal::Button::Up:
+      return BoardHal::Button::Down;
+    case BoardHal::Button::Down:
+      return BoardHal::Button::Up;
+    default:
+      return physicalButton;
+  }
+}
+} // namespace
+
 /**
  * @brief Construct UI thread.
  */
@@ -130,10 +148,11 @@ void UiThread::run()
 
     BoardHal::Button b;
     while (BoardHal::popButton(b)) {
-      post_key(b);
+      const BoardHal::Button appButton = toApplicationButton(b);
+      post_key(appButton);
 
       if (_statusMode) {
-        if (b == BoardHal::Button::Left || b == BoardHal::Button::Right) {
+        if (appButton == BoardHal::Button::Left || appButton == BoardHal::Button::Right) {
           _statusMode = false;
           if (menuReady) {
             _menu.refresh();
@@ -143,11 +162,11 @@ void UiThread::run()
       }
 
       if (menuReady) {
-        if (b == BoardHal::Button::Left && _menu.isAtRootLevel()) {
+        if (appButton == BoardHal::Button::Left && _menu.isAtRootLevel()) {
           _statusMode = true;
           continue;
         }
-        _menu.action(toMenuKey(b));
+        _menu.action(toMenuKey(appButton));
       }
     }
 

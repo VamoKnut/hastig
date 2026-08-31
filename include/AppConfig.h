@@ -7,7 +7,7 @@
 /**
  * @brief Hastig compile-time configuration.
  */
-static constexpr const char* HASTIG_AI_REVISION = "v148";
+static constexpr const char* HASTIG_AI_REVISION = "v158";
 
 // ---------------- Pins ----------------
 static constexpr int PIN_BTN_LEFT  = D5;
@@ -58,3 +58,12 @@ static constexpr uint32_t HIBERNATE_STATUS_GRACE_MS = 1500;
 static constexpr uint32_t HASTIG_COMMS_READY_GRACE_MS = 10000UL;
 static constexpr uint32_t HASTIG_MQTT_CONNECT_TIMEOUT_MS = 120000UL;
 static constexpr uint32_t HASTIG_NO_NETWORK_HIBERNATE_S = 900UL;
+
+// Hardware watchdog. IWDG cannot be stopped once started, so require the
+// STM32 option byte that freezes IWDG in standby before enabling it.
+static constexpr bool HASTIG_WATCHDOG_ENABLE = true;
+static constexpr bool HASTIG_WATCHDOG_PREPARE_OPTION_BYTES = true;
+static constexpr bool HASTIG_WATCHDOG_REQUIRE_STANDBY_FREEZE = true;
+static constexpr uint32_t HASTIG_WATCHDOG_TIMEOUT_MS = 30000UL;
+static constexpr uint32_t HASTIG_WATCHDOG_LONG_OP_KICK_MS = 10000UL;
+static constexpr uint32_t HASTIG_CELLULAR_CONNECT_WATCHDOG_GRACE_MS = 180000UL;

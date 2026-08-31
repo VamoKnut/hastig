@@ -17,6 +17,7 @@ static constexpr const char* kCmdHibernate = "hibernate";
 static constexpr const char* kCmdNudge = "nudge";
 static constexpr const char* kCmdResetBatteryStatistics = "resetBatteryStatistics";
 static constexpr const char* kCmdFactoryReset = "factoryReset";
+static constexpr const char* kCmdBlockWatchdogKick = "blockWatchdogKick";
 
 // Optional command fields
 static constexpr const char* kKeySleepSeconds = "sleepSeconds";
@@ -44,6 +45,7 @@ struct Command
     nudge,
     resetBatteryStatistics,
     factoryReset,
+    blockWatchdogKick,
   };
 
   Type type = Type::unknown;

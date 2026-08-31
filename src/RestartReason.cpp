@@ -146,11 +146,21 @@ static bool wasInLowPowerStandby()
          LowPower.wasInCPUMode(CPUMode::d2DomainStandby);
 }
 
+static bool wasIndependentWatchdogReset()
+{
+  return __HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST) != RESET;
+}
+
 static RestartReasonCode classifyHardwareReset(RestartReasonCode stored,
                                                bool hasStoredReason,
                                                reset_reason_t hwReason,
-                                               bool lowPowerStandbyWake)
+                                               bool lowPowerStandbyWake,
+                                               bool independentWatchdogReset)
 {
+  if (independentWatchdogReset) {
+    return RestartReasonCode::WatchdogReset;
+  }
+
   switch (hwReason) {
     case RESET_REASON_WATCHDOG:
       return RestartReasonCode::WatchdogReset;
@@ -179,7 +189,12 @@ void RestartReasonStore::begin()
 
   const reset_reason_t hwReason = STM32H747::getResetReason();
   const bool lowPowerStandbyWake = wasInLowPowerStandby();
-  _lastReason = classifyHardwareReset(stored, hasStoredReason, hwReason, lowPowerStandbyWake);
+  const bool independentWatchdogReset = wasIndependentWatchdogReset();
+  _lastReason = classifyHardwareReset(stored,
+                                      hasStoredReason,
+                                      hwReason,
+                                      lowPowerStandbyWake,
+                                      independentWatchdogReset);
   _bootCount = bootCount + 1u;
 
   writeStoredReason(_lastReason, _bootCount);
@@ -187,6 +202,7 @@ void RestartReasonStore::begin()
   if (lowPowerStandbyWake) {
     LowPower.resetPreviousCPUModeFlags();
   }
+  __HAL_RCC_CLEAR_RESET_FLAGS();
 }
 
 RestartReasonCode RestartReasonStore::read() const

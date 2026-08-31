@@ -8,6 +8,7 @@ using namespace std::chrono;
 #include "AppConfig.h"
 #include "Logger.h"
 #include "PowerUtil.h"
+#include "WatchdogService.h"
 
 #include "CommsPump.h"
 #include "UiThread.h"
@@ -79,15 +80,18 @@ bool PowerManager::service()
   const uint32_t graceStart = millis();
   while ((uint32_t)(millis() - graceStart) < HIBERNATE_STATUS_GRACE_MS) {
     _comms.loopOnce();
+    WatchdogService::kick();
     rtos::ThisThread::sleep_for(milliseconds(20));
   }
 
   // 2) Stop producers first.
+  WatchdogService::kick();
   LOGI(TAG, "Sleep step: disable producers");
   _sampling.setEnabled(false);
   _agg.setEnabled(false);
 
   // 3) Terminate threads (best-effort, order matters).
+  WatchdogService::kick();
   LOGI(TAG, "Sleep step: stop threads");
   _ui.stop();
   if (_orch != nullptr) {
@@ -97,15 +101,18 @@ bool PowerManager::service()
   _sampling.stop();
 
   // 4) Shutdown comms without modem full end (avoid blocking).
+  WatchdogService::kick();
   LOGI(TAG, "Sleep step: shutdown comms");
   _comms.shutdownForHibernate();
   LOGI(TAG, "Sleep step: comms shutdown returned");
 
   // 5) Persist restart reason.
+  WatchdogService::kick();
   LOGI(TAG, "Sleep step: write restart reason");
   _restartReason.write(_req.reasonCode);
 
   // 6) Enter hibernate.
+  WatchdogService::prepareForHibernate();
   LOGI(TAG, "Sleep step: entering hibernate");
   Serial.flush();
   powerutil::hibernate(_board, _wakePin, _req.expectedDurationS);

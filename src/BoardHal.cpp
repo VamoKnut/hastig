@@ -130,6 +130,10 @@ static const uint16_t kEndOfChargeCurrentMa  = 5;
 
 void BoardHal::configurePins()
 {
+  // Enable I2C POWER
+  //pinMode(PI_1, OUTPUT);
+  //digitalWrite(PI_1, HIGH);
+
   // LEDs
   pinMode(LEDR, OUTPUT);
   pinMode(LEDG, OUTPUT);

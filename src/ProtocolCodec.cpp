@@ -36,6 +36,9 @@ static Command::Type decodeType(const char* type)
   if (strcmp(type, kCmdFactoryReset) == 0) {
     return Command::Type::factoryReset;
   }
+  if (strcmp(type, kCmdBlockWatchdogKick) == 0) {
+    return Command::Type::blockWatchdogKick;
+  }
 
   return Command::Type::unknown;
 }

@@ -12,6 +12,7 @@
 #include "RestartReason.h"
 #include "BoardHal.h"
 #include "HastigGlobals.h"
+#include "WatchdogService.h"
 
 #include "Logger.h"
 #include "StopUtil.h"
@@ -342,6 +343,11 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
 
   if (cmd.type == protocol::Command::Type::factoryReset) {
     _settings.factoryReset();
+    return;
+  }
+
+  if (cmd.type == protocol::Command::Type::blockWatchdogKick) {
+    WatchdogService::blockKicksForTest();
     return;
   }
 

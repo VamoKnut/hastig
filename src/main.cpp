@@ -12,6 +12,7 @@
 #include "RestartReason.h"
 #include "PowerUtil.h"
 #include "PowerManager.h"
+#include "WatchdogService.h"
 
 #include "BoardHal.h"
 
@@ -52,20 +53,38 @@ void setup()
   }
 
   bootM4();
+  
+  // Configure board pins early (before reading buttons).
+  //BoardHal::configurePins();
 
   Display::getInstance().beginHardware();
   Display::getInstance().showSplash(HASTIG_AI_REVISION);
 
   Serial.begin(115200);
   Logger::begin(Serial, 115200);
+  restartReason.begin();
+  const RestartReasonCode lastRestartReason = restartReason.read();
+  // Mark startup as unexpected reboot until we perform a controlled hibernate.
+  restartReason.write(RestartReasonCode::UnexpectedReboot);
+
+  if (WatchdogService::begin()) {
+    // Once IWDG is active, any uncontrolled reboot should be reported as watchdog-driven.
+    // Controlled hibernate paths overwrite this marker before entering low power.
+    restartReason.write(RestartReasonCode::WatchdogReset);
+  }
   delay(2500);
+  WatchdogService::kick();
   Logger::set_runtime_level(Logger::Level::Debug);
 
   LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: %s) ===", HASTIG_AI_REVISION);
+  LOGI(TAG, "Last restart reason: %s (bootCount=%lu)",
+       RestartReasonStore::toString(lastRestartReason),
+       (unsigned long)restartReason.bootCount());
 
   sysCtx.powerManager.setOrchestrator(sysCtx.orchestrator);
 
   // Configure board pins early (before reading buttons).
+  // 26.08.10: Moved to start of method to ensure that the I2C power is enabled before any other peripherals are initialized.
   BoardHal::configurePins();
 
   if (BoardHal::detectFactoryResetButtonCombo()) {
@@ -83,14 +102,6 @@ void setup()
   printSettingsToSerial(sysCtx.settings, Serial);
 
   sysCtx.sessionClock.begin();
-
-  restartReason.begin();
-  const RestartReasonCode lastRestartReason = restartReason.read();
-  LOGI(TAG, "Last restart reason: %s (bootCount=%lu)",
-       RestartReasonStore::toString(lastRestartReason),
-       (unsigned long)restartReason.bootCount());
-  // Mark startup as unexpected reboot until we perform a controlled hibernate.
-  restartReason.write(RestartReasonCode::UnexpectedReboot);
 
   sysCtx.uiThread.start();
 
@@ -120,6 +131,8 @@ void loop()
 
   // Execute sleep transaction if requested by Orchestrator.
   sysCtx.powerManager.service();
+
+  WatchdogService::kick();
 
   // Keep loop responsive; other RTOS threads run independently.
   rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));

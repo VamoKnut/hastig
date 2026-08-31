@@ -19,6 +19,11 @@ static constexpr const char kLedMenuJson[] = R"JSON(
       "retval": {"topic":"cmd", "value":"hibernate"}
     },
     {
+      "label": "Block WD kick",
+      "type": "action",
+      "retval": {"topic":"cmd", "value":"blockWatchdogKick"}
+    },
+    {
       "label": "Setup",
       "type": "sub",
       "items": [

@@ -3,6 +3,7 @@
 #include "ProtocolCodec.h"
 #include "Logger.h"
 #include "TimeUtil.h"
+#include "WatchdogService.h"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -156,6 +157,7 @@ bool CommsPump::ensureNetwork()
   // We keep the recovery minimal; no external power toggling here.
   bool ok = false;
   {
+    WatchdogService::ScopedLongOperation watchdogWindow(HASTIG_CELLULAR_CONNECT_WATCHDOG_GRACE_MS);
     mbed::ScopedLock<rtos::Mutex> lock(gsmMx);
     ok = GSM.begin(s.sim_pin, s.apn, s.apn_user, s.apn_pass, CATM1, 524288UL, true);
   }
@@ -165,7 +167,14 @@ bool CommsPump::ensureNetwork()
     _netFailCount = 0;
     _lastNetOkMs  = timeutil::nowMs();
     postEvent(CommsEventType::NetUp, "net", "up");
-    LOGI(TAG, "GSM.begin OK");
+
+    NetworkInterface* net = GSM.getNetwork();
+    SocketAddress ipAddress;
+    if (net != nullptr && net->get_ip_address(&ipAddress) == NSAPI_ERROR_OK && ipAddress.get_ip_address() != nullptr) {
+      LOGI(TAG, "GSM.begin OK, IP=%s", ipAddress.get_ip_address());
+    } else {
+      LOGI(TAG, "GSM.begin OK");
+    }
     return true;
   }
 
