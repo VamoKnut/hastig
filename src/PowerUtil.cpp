@@ -1,5 +1,6 @@
 #include "PowerUtil.h"
 
+#include "AppConfig.h"
 #include "Logger.h"
 
 static const char* TAG = "PWR";
@@ -8,7 +9,26 @@ namespace powerutil {
 
 void preparePinsForLowPower(uint8_t wakePin)
 {
-  // Typical: wake when pin is pulled LOW.
+  // Put shield-controlled rails and buses in a state that will not source
+  // current into unpowered peripherals.
+  pinMode(PIN_POWER_ENABLE, OUTPUT);
+  digitalWrite(PIN_POWER_ENABLE, LOW);
+
+  pinMode(PIN_RS485_DE_RE, OUTPUT);
+  digitalWrite(PIN_RS485_DE_RE, LOW);
+
+  pinMode(PIN_RS485_TX, OUTPUT);
+  digitalWrite(PIN_RS485_TX, LOW);
+
+  pinMode(PIN_RS485_RX, INPUT);
+
+  // I2C display lines: no internal pulls before standby. External pullups, if
+  // present, can hold the bus idle without the MCU sourcing current.
+  pinMode(D11, INPUT);
+  pinMode(D12, INPUT);
+
+  // Typical: wake when pin is pulled LOW. Configure this last so it wins even
+  // if the wake pin is also one of the shield pins above.
   pinMode(wakePin, INPUT_PULLUP);
 }
 
