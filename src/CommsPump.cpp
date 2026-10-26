@@ -46,10 +46,48 @@ CommsPump::CommsPump(CommsInbox& inbox,
 void CommsPump::begin()
 {
   _bootMs = timeutil::nowMs();
+  _connectionRetrying = false;
+  updateConnectionIndicator();
   mqtt.setCallback(CommsPump::mqttCallbackTrampoline);
   mqtt.setSocketTimeout(2);
   mqtt.setKeepAlive(30);
   postEvent(CommsEventType::Boot, "boot", "comms pump ready");
+}
+
+void CommsPump::updateConnectionIndicator()
+{
+  if (_mqttConnected && mqtt.connected()) {
+    _connectionRetrying = false;
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Connected);
+  } else if (_connectionRetrying) {
+    const bool blinkOn = ((millis() / 250u) & 1u) == 0u;
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Retrying, blinkOn);
+  } else {
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Connecting);
+  }
+}
+
+void CommsPump::waitWithRetryIndicator(uint32_t durationMs)
+{
+  _connectionRetrying = true;
+  const uint32_t start = millis();
+  while ((uint32_t)(millis() - start) < durationMs) {
+    updateConnectionIndicator();
+    const uint32_t elapsed = millis() - start;
+    const uint32_t remaining = durationMs - elapsed;
+    rtos::ThisThread::sleep_for(milliseconds(remaining < 100u ? remaining : 100u));
+  }
+  updateConnectionIndicator();
+}
+
+void CommsPump::flashConnectionIndicator(uint8_t times, uint32_t onMs, uint32_t offMs)
+{
+  for (uint8_t i = 0; i < times; ++i) {
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Retrying, true);
+    rtos::ThisThread::sleep_for(milliseconds(onMs));
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Retrying, false);
+    rtos::ThisThread::sleep_for(milliseconds(offMs));
+  }
 }
 
 void CommsPump::prepareHibernate()
@@ -151,6 +189,7 @@ bool CommsPump::ensureNetwork()
 
   const AppSettings s = _settings.getCopy();
 
+  updateConnectionIndicator();
 
   LOGI(TAG, "Connecting to 4G network (APN=%s)...", s.apn);
 
@@ -164,6 +203,7 @@ bool CommsPump::ensureNetwork()
 
   if (ok) {
     _netConnected = true;
+    _connectionRetrying = false;
     _netFailCount = 0;
     _lastNetOkMs  = timeutil::nowMs();
     postEvent(CommsEventType::NetUp, "net", "up");
@@ -182,14 +222,18 @@ bool CommsPump::ensureNetwork()
   _netFailCount++;
   postEvent(CommsEventType::NetDown, "net", "down");
   LOGW(TAG, "GSM.begin failed (count=%lu)", (unsigned long)_netFailCount);
+  _connectionRetrying = true;
 
   // Backoff and occasionally reset modem stack.
   if ((_netFailCount % 3u) == 0u) {
+    flashConnectionIndicator(3, 180u, 120u);
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Retrying, true);
     mbed::ScopedLock<rtos::Mutex> lock(gsmMx);
     GSM.reset();
+    BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Retrying, false);
   }
 
-  rtos::ThisThread::sleep_for(milliseconds((_netFailCount < 5) ? 1500u : 5000u));
+  waitWithRetryIndicator((_netFailCount < 5) ? 1500u : 5000u);
   return false;
 }
 
@@ -246,7 +290,9 @@ bool CommsPump::ensureMqtt()
       _subscriptionsReady = true;
     }
     _mqttConnected = true;
+    _connectionRetrying = false;
     _lastMqttOkMs  = timeutil::nowMs();
+    updateConnectionIndicator();
     return true;
   }
 
@@ -263,12 +309,14 @@ bool CommsPump::ensureMqtt()
         break;
       }
       LOGW(TAG, "TCP connect failed (%d/3)", i + 1);
-      rtos::ThisThread::sleep_for(milliseconds(1000));
+      _connectionRetrying = true;
+      waitWithRetryIndicator(1000u);
     }
   }
 
   if (!tcpOk) {
     _mqttFailCount++;
+    _connectionRetrying = true;
     teardownLinks(false);
     postEvent(CommsEventType::MqttDown, "mqtt", "tcp_fail");
     _lastNetOkMs = 0;
@@ -300,14 +348,17 @@ bool CommsPump::ensureMqtt()
     }
     _subscriptionsReady = true;
     _mqttConnected = true;
+    _connectionRetrying = false;
     _mqttFailCount = 0;
     _lastMqttOkMs  = timeutil::nowMs();
     postEvent(CommsEventType::MqttUp, "mqtt", "up");
     LOGI(TAG, "MQTT connected, subscribed to %s", _topicCmd);
+    updateConnectionIndicator();
     return true;
   }
 
   _mqttFailCount++;
+  _connectionRetrying = true;
   LOGW(TAG, "MQTT connect failed. state=%d", mqtt.state());
   teardownLinks(false);
   postEvent(CommsEventType::MqttDown, "mqtt", "down");
@@ -482,6 +533,7 @@ void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
  */
 void CommsPump::loopOnce()
 {
+  updateConnectionIndicator();
   if (!_hibernatePending && _wantConnected &&
       (timeutil::nowMs() - _bootMs) < HASTIG_COMMS_READY_GRACE_MS) {
     if (!_bootGraceLogged) {
@@ -507,6 +559,11 @@ void CommsPump::loopOnce()
   if (_wantConnected) {
 
     if (!mqtt.connected()) {
+      if (_mqttConnected || _netConnected) {
+        _connectionRetrying = true;
+      }
+      _mqttConnected = false;
+      updateConnectionIndicator();
       (void)ensureMqtt();
     }
 
@@ -516,8 +573,10 @@ void CommsPump::loopOnce()
     if (!loopOk && !mqtt.connected()) {
       postEvent(CommsEventType::MqttDown, "mqtt", "loop_fail");
       teardownLinks(false);
+      _connectionRetrying = true;
     }
   }
+  updateConnectionIndicator();
 
   // Drain aggregates and publish
   uint8_t publishedThisLoop = 0;

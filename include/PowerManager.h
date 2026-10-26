@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <atomic>
+#include <mbed.h>
 
 #include "RestartReason.h"
 
@@ -32,7 +33,7 @@ public:
                UiThread& ui,
                AggregatorThread& agg,
                SamplingThread& sampling,
-               uint8_t wakePin);
+               PinName wakePin);
 
   void setOrchestrator(Orchestrator& orch);
 
@@ -58,7 +59,7 @@ private:
   AggregatorThread& _agg;
   SamplingThread& _sampling;
 
-  const uint8_t _wakePin;
+  const PinName _wakePin;
 
   std::atomic_bool _pending{false};
   std::atomic_bool _inProgress{false};

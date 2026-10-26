@@ -10,18 +10,49 @@
 static constexpr const char* HASTIG_AI_REVISION = "v158";
 
 // ---------------- Pins ----------------
-static constexpr int PIN_BTN_LEFT  = D5;
-static constexpr int PIN_BTN_UP = D4;
-static constexpr int PIN_BTN_DOWN    = D2;
-static constexpr int PIN_BTN_RIGHT  = D1;
+static constexpr PinName PIN_BTN_LEFT = PC_13;
+static constexpr PinName PIN_BTN_UP = PC_15;
+static constexpr PinName PIN_BTN_DOWN = PD_4;
+static constexpr PinName PIN_BTN_RIGHT = PD_5;
+static constexpr PinName PIN_WAKE = PC_13;
 
-// RS485 / sensor power
-static constexpr int PIN_RS485_DE_RE  = D6;
-static constexpr int PIN_POWER_ENABLE = D3;
+// Serial
+static constexpr PinName PIN_RS485_DE_RE = PA_8;
+static constexpr PinName PIN_RS485_RX = PA_10;
+static constexpr PinName PIN_RS485_TX = PA_9;
+static constexpr PinName PIN_232_TX = PG_14;
+static constexpr PinName PIN_232_RX = PG_9;
+static constexpr PinName PIN_232_Enable = PC_3C;
+static constexpr PinName PIN_232_ForceOn = PA_1C;
+static constexpr PinName PIN_232_Valid = PI_0;
 
-// UART pins (Portenta)
-static constexpr int PIN_RS485_RX = D13;
-static constexpr int PIN_RS485_TX = D14;
+// Power control
+static constexpr PinName PIN_POWER_ENABLE = PG_7;
+static constexpr PinName PIN_ExtPwr1_Disable = PI_4;
+static constexpr PinName PIN_ExtPwr2_Disable = PI_6;
+static constexpr PinName PIN_ExtPwr1_Monitor = PA_4;
+static constexpr PinName PIN_ExtPwr2_Monitor = PC_3;
+
+// Motor control
+static constexpr PinName PIN_MOTORA_Enable = PG_3;
+static constexpr PinName PIN_MOTORA_In1 = PC_6;
+static constexpr PinName PIN_MOTORA_In2 = PC_7;
+static constexpr PinName PIN_MOTORB_Enable = PG_10;
+static constexpr PinName PIN_MOTORB_In1 = PJ_11;
+static constexpr PinName PIN_MOTORB_In2 = PK_1;
+static constexpr PinName PIN_MOTORA_Disabled = PC_2C;
+static constexpr PinName PIN_MOTORB_Disabled = PA_1C;
+
+
+// Other board I/O
+
+static constexpr PinName PIN_DISPLAY_SDA = PH_8;
+static constexpr PinName PIN_DISPLAY_SCL = PH_7;
+static constexpr PinName PIN_LED_RED = PK_5;
+static constexpr PinName PIN_LED_GREEN = PK_6;
+static constexpr PinName PIN_LED_BLUE = PK_7;
+static constexpr PinName PIN_SESSION_ENTROPY_A = PA_0C;
+static constexpr PinName PIN_SESSION_ENTROPY_B = PA_1C;
 
 // ---------------- Thread priorities ----------------
 static constexpr osPriority PRIO_ORCH  = osPriorityNormal;

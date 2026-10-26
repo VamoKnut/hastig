@@ -24,7 +24,7 @@ PowerManager::PowerManager(Board& board,
                            UiThread& ui,
                            AggregatorThread& agg,
                            SamplingThread& sampling,
-                           uint8_t wakePin)
+                           PinName wakePin)
     : _board(board),
       _restartReason(restartReason),
       _comms(comms),

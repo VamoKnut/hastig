@@ -1,11 +1,16 @@
 #include "TimeUtil.h"
-\
 #include "SessionClock.h"
 
 #include <Arduino.h>
 #include <platform/ScopedLock.h>
 #include <string.h>
-#include <platform/ScopedLock.h>
+
+#include "AppConfig.h"
+
+namespace {
+static mbed::AnalogIn sessionEntropyA(PIN_SESSION_ENTROPY_A);
+static mbed::AnalogIn sessionEntropyB(PIN_SESSION_ENTROPY_B);
+}
 
 static uint32_t mix32(uint32_t x)
 {
@@ -93,8 +98,8 @@ uint32_t SessionClock::relMs() const
  */
 void SessionClock::generateLocalGuid(char* out, size_t outLen)
 {
-  const uint32_t a = mix32((uint32_t)micros() ^ (uint32_t)analogRead(A0));
-  const uint32_t b = mix32((uint32_t)millis() ^ (uint32_t)analogRead(A1));
+  const uint32_t a = mix32((uint32_t)micros() ^ sessionEntropyA.read_u16());
+  const uint32_t b = mix32((uint32_t)millis() ^ sessionEntropyB.read_u16());
   const uint32_t c = mix32(a ^ b ^ 0x12345678u);
   const uint32_t d = mix32(b ^ c ^ 0x9abcdef0u);
 

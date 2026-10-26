@@ -34,13 +34,13 @@ Board             g_board;
 Battery           g_battery;
 Charger           g_charger;
 static RestartReasonStore restartReason;
-static const uint8_t kWakePin = 0; // GPIO0 / Arduino D0 terminology
+static constexpr PinName kWakePin = PIN_WAKE;
 
 static SystemContext sysCtx(g_board, restartReason, kWakePin);
 
 static const char* TAG = "HASTIG";
 
-// Route mbed stdio to USB CDC so default UART console does not claim D13/D14.
+// Route mbed stdio to USB CDC so default UART console does not claim PA_10/PA_9.
 REDIRECT_STDOUT_TO(SerialUSB);
 
 

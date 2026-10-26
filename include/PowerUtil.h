@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#include <Arduino.h>
+#include <mbed.h>
 #include <Arduino_PowerManagement.h>
 
 /**
@@ -16,7 +16,7 @@ namespace powerutil {
 /**
  * @brief Prepare pins that must be in a defined state during hibernate.
  */
-void preparePinsForLowPower(uint8_t wakePin);
+void preparePinsForLowPower(mbed::DigitalIn& wakeInput);
 
 /**
  * @brief Enter deep standby until a wake event occurs.
@@ -26,9 +26,9 @@ void preparePinsForLowPower(uint8_t wakePin);
  * - Calls standByUntilWakeupEvent()
  *
  * @param board Board power object.
- * @param wakePin GPIO number used as wake pin (Arduino pin number).
+ * @param wakePin mbed pin name used as wake pin.
  * @param expectedDurationS Desired hibernate duration in seconds (clamped to 12h).
  */
-void hibernate(Board& board, uint8_t wakePin, uint32_t expectedDurationS);
+void hibernate(Board& board, PinName wakePin, uint32_t expectedDurationS);
 
 } // namespace powerutil

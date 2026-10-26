@@ -18,6 +18,7 @@ class BoardHal {
 public:
   enum class LedColor : uint8_t { Red, Green, Blue };
   enum class Button : uint8_t { Left, Right, Up, Down };
+  enum class ConnectionIndicator : uint8_t { Off, Connecting, Connected, Retrying };
 
   /**
    * @brief Pop next debounced button event (posted from IRQ).
@@ -42,11 +43,13 @@ public:
 
   /** LED helpers. Portenta LEDs are active-low; callers use colors only. */
   static void setLed(LedColor color, bool on);
+  static void setConnectionIndicator(ConnectionIndicator state, bool blinkOn = true);
   static void blinkLed(LedColor color, uint32_t ms, uint8_t times = 1, uint32_t gapMs = 60);
   static void blinkDualLedFeedback(uint32_t durationMs = 5000u, uint32_t intervalMs = 250u);
 
   /** External sensor/RS485 rail control. */
   static void setSensorPower(bool powerOn = true);
+  static void setRs485TransmitEnabled(bool enabled);
 
   /** Battery/charger wrappers (Portenta-specific via Arduino_PowerManagement). */
   static BatterySnapshot readBattery(Battery& battery);

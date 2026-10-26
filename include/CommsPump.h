@@ -67,6 +67,7 @@ private:
 
   bool _wantConnected = true;
   bool _hibernatePending = false;
+  bool _connectionRetrying = false;
 
   bool     _netConnected  = false;
   bool     _mqttConnected = false;
@@ -93,6 +94,9 @@ private:
   bool ensureMqtt();
 
   void teardownLinks(bool endGsm);
+  void updateConnectionIndicator();
+  void waitWithRetryIndicator(uint32_t durationMs);
+  void flashConnectionIndicator(uint8_t times, uint32_t onMs, uint32_t offMs);
 
   bool publishStatus(const char* mode, const char* extraJsonKVsOrNull);
   bool publishConfigSnapshot();

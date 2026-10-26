@@ -1,17 +1,17 @@
-D5 (J2-61) "left"
-D4 (J2-63) "up"
-D2 (J2-67) "down"
-D1 (J2-68) "right"
-GPIO0 (J2-46) - "up" (D4) for wake-up
+PC_6 (D5, J2-61) "left"
+PC_7 (D4, J2-63) "up"
+PJ_11 (D2, J2-67) "down"
+PK_1 (D1, J2-68) "right"
+PH_15 (GPIO0, D0, J2-46) - wake-up
 
-D3 (J2-65) Power switch
-D6 (J2-59) RX/TX switch RS485 (!RE, DE)
+PG_7 (D3, J2-65) Power switch
+PA_8 (D6, J2-59) RX/TX switch RS485 (!RE, DE)
 
-D14 (J1-33 UART1 TX) RS-485 DI
-D13 (j1-35 UART1 RX) RS-485 RO
+PA_9 (D14, J1-33 UART1 TX) RS-485 DI
+PA_10 (D13, J1-35 UART1 RX) RS-485 RO
 
-D12 (J1-46 I2C0 SCL) Display SCL
-D11 (J1-44 I2C0 SDA) Display SDA
+PH_7 (D12, J1-46 I2C0 SCL) Display SCL
+PH_8 (D11, J1-44 I2C0 SDA) Display SDA
 
 Display Pwr +3V3, GND
 

@@ -51,7 +51,7 @@ struct SystemContext {
   PowerManager powerManager;
   Orchestrator orchestrator;
 
-  SystemContext(Board& board, RestartReasonStore& rrStore, uint8_t wakePin)
+  SystemContext(Board& board, RestartReasonStore& rrStore, PinName wakePin)
       : settings(),
         sessionClock(),
         eventBus(mailboxes.uiToOrchMail, mailboxes.commsToOrchMail, mailboxes.workerToOrchMail),

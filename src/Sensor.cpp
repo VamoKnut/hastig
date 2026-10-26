@@ -6,6 +6,7 @@
 #include <Arduino.h>
 #include <ArduinoModbus.h>
 #include <ArduinoRS485.h>
+#include <pinDefinitions.h>
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
@@ -71,7 +72,10 @@ class SeametricsCT2X : public Sensor
          return false;
       }
 
-      RS485.setPins(PIN_RS485_TX, PIN_RS485_DE_RE, PIN_RS485_DE_RE);
+      // ArduinoRS485::setPins accepts Arduino pin indices, not mbed PinName values.
+      RS485.setPins(PinNameToIndex(PIN_RS485_TX),
+                    PinNameToIndex(PIN_RS485_DE_RE),
+                    PinNameToIndex(PIN_RS485_DE_RE));
       const int frameDelayUs = calcFrameDelayUs(s.sensor_baud);
       RS485.setDelays(frameDelayUs, frameDelayUs);
 
@@ -84,10 +88,7 @@ class SeametricsCT2X : public Sensor
       ModbusRTUClient.setTimeout(kTimeoutMs);
       _slaveId = s.sensor_addr;
       LOGI(TAG,
-           "Seametrics modbus uart tx=D%d rx=D%d de/re=%d baud=%lu addr=%u timeout=%lu",
-           (int)PIN_RS485_TX,
-           (int)PIN_RS485_RX,
-           (int)PIN_RS485_DE_RE,
+           "Seametrics modbus uart tx=PA_9 rx=PA_10 de/re=PA_8 baud=%lu addr=%u timeout=%lu",
            (unsigned long)s.sensor_baud,
            (unsigned int)_slaveId,
            (unsigned long)kTimeoutMs);
