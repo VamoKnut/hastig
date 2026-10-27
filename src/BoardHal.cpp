@@ -1,6 +1,7 @@
 #include "BoardHal.h"
 
 #include <rtos/EventFlags.h>
+#include <platform/CriticalSectionLock.h>
 #include <stdio.h>
 
 #include "HastigGlobals.h"
@@ -14,7 +15,7 @@ namespace
 {
 static constexpr uint8_t KTD_LED_CONNECTION   = 1;
 static constexpr uint8_t KTD_LED_SENSOR_POWER = 3;
-static constexpr uint8_t KTD_LED_MAX          = KTD2052::MAX_CURRENT;
+static constexpr uint8_t KTD_LED_MAX          = RgbLedStrip::MAX_CURRENT;
 static rtos::Mutex       ledDriverMutex;
 static bool              ledDriverReady           = false;
 static bool              connectionLedStateValid  = false;
@@ -58,6 +59,7 @@ static volatile uint8_t g_btnHead = 0;
 static volatile uint8_t g_btnTail = 0;
 static BoardHal::Button g_btnQueue[16];
 static unsigned long    g_btnLastPressMs[4] = {0, 0, 0, 0};
+static bool             g_btnHasLastPress[4] = {false, false, false, false};
 static bool             g_btnLatched[4]     = {false, false, false, false};
 
 static mbed::InterruptIn& buttonInput(BoardHal::Button button)
@@ -77,18 +79,12 @@ static mbed::InterruptIn& buttonInput(BoardHal::Button button)
    }
 }
 
-static inline void refreshButtonLatches()
+static inline void releaseButtonIsr(BoardHal::Button button)
 {
-   for (uint8_t i = 0; i < 4u; ++i)
+   const uint8_t index = (uint8_t)button;
+   if (index < 4u)
    {
-      if (!g_btnLatched[i])
-      {
-         continue;
-      }
-      if (buttonInput((BoardHal::Button)i).read() != 0)
-      {
-         g_btnLatched[i] = false;
-      }
+      g_btnLatched[index] = false;
    }
 }
 
@@ -123,7 +119,7 @@ static inline void pushButtonPressIsrDebounced(BoardHal::Button b)
 
    unsigned long&      lastMs = g_btnLastPressMs[index];
    const unsigned long nowMs  = millis();
-   if ((unsigned long)(nowMs - lastMs) <= kButtonDebounceMs)
+   if (g_btnHasLastPress[index] && (unsigned long)(nowMs - lastMs) <= kButtonDebounceMs)
    {
       return;
    }
@@ -131,6 +127,7 @@ static inline void pushButtonPressIsrDebounced(BoardHal::Button b)
    pushButtonIsr(b);
    g_btnLatched[index] = true;
    lastMs              = nowMs;
+   g_btnHasLastPress[index] = true;
 }
 
 static void onButtonLeftIrq()
@@ -151,6 +148,26 @@ static void onButtonUpIrq()
 static void onButtonDownIrq()
 {
    pushButtonPressIsrDebounced(BoardHal::Button::Down);
+}
+
+static void onButtonLeftReleaseIrq()
+{
+   releaseButtonIsr(BoardHal::Button::Left);
+}
+
+static void onButtonRightReleaseIrq()
+{
+   releaseButtonIsr(BoardHal::Button::Right);
+}
+
+static void onButtonUpReleaseIrq()
+{
+   releaseButtonIsr(BoardHal::Button::Up);
+}
+
+static void onButtonDownReleaseIrq()
+{
+   releaseButtonIsr(BoardHal::Button::Down);
 }
 
 static const uint16_t kBatteryCapacityMah    = 10000;
@@ -177,18 +194,18 @@ void BoardHal::configurePins()
    // RS485 direction pin (default RX)
    rs485DriverEnable.write(0);
 
-   KTD2052&                      ledDriver = hastig_led_driver();
+   RgbLedStrip&                  ledStrip = hastig_led_strip();
    mbed::ScopedLock<rtos::Mutex> lock(ledDriverMutex);
-   ledDriverReady = ledDriver.begin();
+   ledDriverReady = ledStrip.begin();
    if (!ledDriverReady)
    {
-      LOGE(TAG, "KTD2052 initialization failed; RGB LEDs may remain in boot pattern");
+      LOGE(TAG, "RGB LED strip initialization failed; LEDs may remain in boot pattern");
       return;
    }
-   if (!ledDriver.allOff())
+   if (!ledStrip.allOff())
    {
       ledDriverReady = false;
-      LOGE(TAG, "KTD2052 allOff failed");
+      LOGE(TAG, "RGB LED strip allOff failed");
    }
 }
 
@@ -200,7 +217,6 @@ void BoardHal::setLed(LedColor color, bool on)
 
 void BoardHal::setConnectionIndicator(ConnectionIndicator state, bool blinkOn)
 {
-   const float intensityFactor = 0.25f;
    uint8_t     red             = 0;
    uint8_t     green           = 0;
    uint8_t     blue            = 0;
@@ -230,15 +246,16 @@ void BoardHal::setConnectionIndicator(ConnectionIndicator state, bool blinkOn)
    {
       return;
    }
-   if (!hastig_led_driver().setRGB(KTD_LED_CONNECTION, red * intensityFactor, green * intensityFactor, blue * intensityFactor))
+   if (!hastig_led_strip().setRGB(KTD_LED_CONNECTION, red , green, blue))
    {
       if (!connectionLedErrorLogged)
       {
-         LOGE(TAG, "Failed to update KTD2052 connection indicator");
+         LOGE(TAG, "Failed to update RGB LED connection indicator");
          connectionLedErrorLogged = true;
       }
       return;
    }
+   hastig_led_strip().setMode(RgbLedStrip::Mode::Night);
    connectionLedErrorLogged = false;
    connectionLedRgb[0]      = red;
    connectionLedRgb[1]      = green;
@@ -287,9 +304,9 @@ void BoardHal::setSensorPower(bool powerOn)
    {
       return;
    }
-   if (!hastig_led_driver().setRGB(KTD_LED_SENSOR_POWER, 0, powerOn ? KTD_LED_MAX : 0, 0))
+   if (!hastig_led_strip().setRGB(KTD_LED_SENSOR_POWER, 0, powerOn ? KTD_LED_MAX : 0, 0))
    {
-      LOGE(TAG, "Failed to update KTD2052 sensor-power indicator");
+      LOGE(TAG, "Failed to update RGB LED sensor-power indicator");
       return;
    }
    sensorLedPowerOn    = powerOn;
@@ -394,20 +411,24 @@ void BoardHal::enableButtonIrq()
    for (uint8_t i = 0; i < 4u; ++i)
    {
       g_btnLatched[i] = false;
+      g_btnHasLastPress[i] = false;
    }
 
-   // Active-low buttons report presses on falling edges.
+   // Active-low buttons report presses on falling edges and release the latch on rising edges.
    buttonLeft.fall(onButtonLeftIrq);
    buttonRight.fall(onButtonRightIrq);
    buttonUp.fall(onButtonUpIrq);
    buttonDown.fall(onButtonDownIrq);
+   buttonLeft.rise(onButtonLeftReleaseIrq);
+   buttonRight.rise(onButtonRightReleaseIrq);
+   buttonUp.rise(onButtonUpReleaseIrq);
+   buttonDown.rise(onButtonDownReleaseIrq);
 }
 
 bool BoardHal::popButton(BoardHal::Button& outButton)
 {
-   refreshButtonLatches();
-
-   // Single-consumer (UI thread) pop; ISR is producer.
+   // Protect the short dequeue from the ISR producer.
+   mbed::CriticalSectionLock lock;
    if (g_btnTail == g_btnHead)
    {
       return false;
@@ -419,8 +440,6 @@ bool BoardHal::popButton(BoardHal::Button& outButton)
 
 bool BoardHal::waitForButtonEvent(uint32_t timeoutMs)
 {
-   refreshButtonLatches();
    const uint32_t flags = g_btnFlags.wait_any(BTN_FLAG_ANY, timeoutMs);
-   refreshButtonLatches();
    return (flags & BTN_FLAG_ANY) != 0u;
 }

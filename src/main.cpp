@@ -1,8 +1,9 @@
 #include <Arduino.h>
-#include <mbed.h>
-
-#include <Arduino_PowerManagement.h>
 #include <Arduino_LowPowerPortentaH7.h>
+
+#if defined(CORE_CM7)
+#include <mbed.h>
+#include <Arduino_PowerManagement.h>
 
 #include "AppConfig.h"
 #include "Logger.h"
@@ -43,6 +44,7 @@ static const char* TAG = "HASTIG";
 // Route mbed stdio to USB CDC so default UART console does not claim PA_10/PA_9.
 REDIRECT_STDOUT_TO(SerialUSB);
 
+#endif
 
 void setup()
 {
@@ -120,6 +122,7 @@ void setup()
 #endif
 }
 
+#if defined(CORE_CM7)
 /**
  * @brief Arduino loop - RTOS threads do the work.
  */
@@ -137,3 +140,12 @@ void loop()
   // Keep loop responsive; other RTOS threads run independently.
   rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));
 }
+
+#else
+void loop()
+{
+  // M4 core is in standby; this loop should never be reached.
+  while (1) {
+  }
+}
+#endif

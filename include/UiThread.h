@@ -2,6 +2,7 @@
 
 #include <mbed.h>
 #include <platform/ScopedLock.h>
+#include <atomic>
 
 #include "AppConfig.h"
 #include "BoardHal.h"
@@ -22,7 +23,7 @@ public:
    * @brief Start RTOS thread.
    */
   void start();
-  void stop();
+  bool stop(uint32_t timeoutMs = 3000u);
 
   /**
    * @brief Update status lines.
@@ -39,6 +40,10 @@ private:
   bool      _statusMode = true;
 
   rtos::Thread _thread;
+  rtos::EventFlags _completion;
+  std::atomic<bool> _stopRequested{false};
+
+  static constexpr uint32_t FLAG_STOPPED = 1u << 0;
 
   mutable rtos::Mutex _mx;
   char                _line1[22] = "Hastig boot...";

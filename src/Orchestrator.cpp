@@ -15,7 +15,6 @@
 #include "WatchdogService.h"
 
 #include "Logger.h"
-#include "StopUtil.h"
 #include "TimeUtil.h"
 
 #include "ProtocolCodec.h"
@@ -132,7 +131,9 @@ void Orchestrator::start()
  */
 void Orchestrator::threadEntry(void* ctx)
 {
-  static_cast<Orchestrator*>(ctx)->run();
+  auto* self = static_cast<Orchestrator*>(ctx);
+  self->run();
+  self->_completion.set(FLAG_STOPPED);
 }
 
 
@@ -498,7 +499,7 @@ void Orchestrator::checkTimeouts()
   }
 
   // Execute emergency hibernate when armed and timer elapsed.
-  if (_emergencyArmed && now >= _emergencyAtMs) {
+  if (_emergencyArmed && (int32_t)(now - _emergencyAtMs) >= 0) {
     LOGW(TAG, "Emergency power save hibernate");
     _hibernateReason = HibernateReason::EmergencyPowerSave;
     _forcedHibernateS = s.emergency_sleep_s;
@@ -549,7 +550,7 @@ void Orchestrator::run()
   
   enterState(State::Aware);
 
-  while (true) {
+  while (!_stopRequested.load()) {
     const uint32_t nowMs = timeutil::nowMs();
 
     // If MQTT never comes up within timeout, conserve power.
@@ -641,7 +642,8 @@ void Orchestrator::run()
   }
 }
 
-void Orchestrator::stop()
+bool Orchestrator::stop(uint32_t timeoutMs)
 {
-  stoputil::terminateThread("Orchestrator", _thread);
+  _stopRequested.store(true);
+  return (_completion.wait_any(FLAG_STOPPED, timeoutMs, false) & FLAG_STOPPED) != 0u;
 }

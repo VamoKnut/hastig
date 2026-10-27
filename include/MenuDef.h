@@ -28,6 +28,14 @@ static constexpr const char kLedMenuJson[] = R"JSON(
       "type": "sub",
       "items": [
         {
+          "label": "Keyboard layout",
+          "type": "sel",
+          "items": [
+            {"label":"PCB_Buttons", "retval":{"topic":"setup","prop":"keyboardLayout","value":"PCB_Buttons"}},
+            {"label":"Membran_Buttons", "retval":{"topic":"setup","prop":"keyboardLayout","value":"Membran_Buttons"}}
+          ]
+        },
+        {
           "label": "Sensor address",
           "type": "sel",
           "items": [

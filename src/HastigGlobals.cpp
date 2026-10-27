@@ -4,7 +4,7 @@
 extern Board   g_board;
 extern Battery g_battery;
 
-KTD2052 g_ledDriver;
+RgbLedStrip g_rgbLedStrip;
 
 Board& hastig_board()
 {
@@ -16,7 +16,7 @@ Battery& hastig_battery()
   return g_battery;
 }
 
-KTD2052& hastig_led_driver()
+RgbLedStrip& hastig_led_strip()
 {
-  return g_ledDriver;
+  return g_rgbLedStrip;
 }

@@ -5,6 +5,8 @@
 #include <chrono>
 using namespace std::chrono;
 
+#include <platform/ScopedLock.h>
+
 #include "AppConfig.h"
 #include "Logger.h"
 #include "PowerUtil.h"
@@ -53,35 +55,52 @@ uint32_t PowerManager::clampSleepS(uint32_t s) const
 
 void PowerManager::requestSleep(RestartReasonCode reasonCode, uint32_t expectedDurationS)
 {
-  if (_inProgress.load() || _pending.load()) {
+  mbed::ScopedLock<rtos::Mutex> lock(_requestMutex);
+  if (_inProgress || _pending) {
     return;
   }
   _req.reasonCode        = reasonCode;
   _req.expectedDurationS = clampSleepS(expectedDurationS);
-  _pending.store(true);
+  _pending = true;
+}
+
+void PowerManager::deferSleep(const SleepRequest& request)
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_requestMutex);
+  _req = request;
+  _pending = true;
+  _inProgress = false;
 }
 
 bool PowerManager::service()
 {
-  if (!_pending.exchange(false)) {
-    return false;
+  SleepRequest request;
+  {
+    mbed::ScopedLock<rtos::Mutex> lock(_requestMutex);
+    if (!_pending) {
+      return false;
+    }
+    _pending = false;
+    _inProgress = true;
+    request = _req;
   }
 
-  _inProgress.store(true);
-
   LOGI(TAG, "Sleep requested: code=%lu duration=%lu s",
-       (unsigned long)_req.reasonCode,
-       (unsigned long)_req.expectedDurationS);
+       (unsigned long)request.reasonCode,
+       (unsigned long)request.expectedDurationS);
 
-  // Prevent new TCP/MQTT connect attempts during the grace window.
-  _comms.prepareHibernate();
+  if (!_commsPrepared) {
+    // Give queued hibernation status a chance to publish before preventing
+    // new connections and tearing down the current MQTT/TCP session.
+    const uint32_t graceStart = millis();
+    while ((uint32_t)(millis() - graceStart) < HIBERNATE_STATUS_GRACE_MS) {
+      _comms.loopOnce();
+      WatchdogService::kick();
+      rtos::ThisThread::sleep_for(milliseconds(20));
+    }
 
-  // 1) Grace window: keep pumping comms so "hibernating" status/config replies can flush out.
-  const uint32_t graceStart = millis();
-  while ((uint32_t)(millis() - graceStart) < HIBERNATE_STATUS_GRACE_MS) {
-    _comms.loopOnce();
-    WatchdogService::kick();
-    rtos::ThisThread::sleep_for(milliseconds(20));
+    _comms.prepareHibernate();
+    _commsPrepared = true;
   }
 
   // 2) Stop producers first.
@@ -90,15 +109,30 @@ bool PowerManager::service()
   _sampling.setEnabled(false);
   _agg.setEnabled(false);
 
-  // 3) Terminate threads (best-effort, order matters).
+  // 3) Stop policy before workers, then wait for sensor cleanup before
+  // allowing aggregation to discard any remaining samples.
   WatchdogService::kick();
   LOGI(TAG, "Sleep step: stop threads");
-  _ui.stop();
-  if (_orch != nullptr) {
-    _orch->stop();
+  if (_orch != nullptr && !_orch->stop()) {
+    LOGE(TAG, "Orchestrator did not stop; deferring hibernate");
+    deferSleep(request);
+    return false;
   }
-  _agg.stop();
-  _sampling.stop();
+  if (!_sampling.stop()) {
+    LOGE(TAG, "Sampling worker did not stop; deferring hibernate");
+    deferSleep(request);
+    return false;
+  }
+  if (!_agg.stop()) {
+    LOGE(TAG, "Aggregation worker did not stop; deferring hibernate");
+    deferSleep(request);
+    return false;
+  }
+  if (!_ui.stop()) {
+    LOGE(TAG, "UI worker did not stop; deferring hibernate");
+    deferSleep(request);
+    return false;
+  }
 
   // 4) Shutdown comms without modem full end (avoid blocking).
   WatchdogService::kick();
@@ -109,15 +143,19 @@ bool PowerManager::service()
   // 5) Persist restart reason.
   WatchdogService::kick();
   LOGI(TAG, "Sleep step: write restart reason");
-  _restartReason.write(_req.reasonCode);
+  _restartReason.write(request.reasonCode);
 
   // 6) Enter hibernate.
   WatchdogService::prepareForHibernate();
   LOGI(TAG, "Sleep step: entering hibernate");
   Serial.flush();
-  powerutil::hibernate(_board, _wakePin, _req.expectedDurationS);
+  powerutil::hibernate(_board, _wakePin, request.expectedDurationS);
 
   LOGW(TAG, "Returned from hibernate (unexpected)");
-  _inProgress.store(false);
+  _commsPrepared = false;
+  {
+    mbed::ScopedLock<rtos::Mutex> lock(_requestMutex);
+    _inProgress = false;
+  }
   return true;
 }

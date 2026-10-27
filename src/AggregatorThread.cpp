@@ -1,7 +1,6 @@
 #include "AggregatorThread.h"
 
 #include "Logger.h"
-#include "StopUtil.h"
 #include <Arduino.h>
 #include <chrono>
 #include <string.h>
@@ -109,9 +108,12 @@ void AggregatorThread::start()
    _thread.start(mbed::callback(AggregatorThread::threadEntry, this));
 }
 
-void AggregatorThread::stop()
+bool AggregatorThread::stop(uint32_t timeoutMs)
 {
-   stoputil::terminateThread("AggregatorThread", _thread);
+   _stopRequested.store(true);
+   _enabled.store(false);
+   _flags.set(FLAG_WAKE);
+   return (_completion.wait_any(FLAG_STOPPED, timeoutMs, false) & FLAG_STOPPED) != 0u;
 }
 
 void AggregatorThread::setEnabled(bool en)
@@ -122,19 +124,36 @@ void AggregatorThread::setEnabled(bool en)
 
 void AggregatorThread::threadEntry(void* ctx)
 {
-   static_cast<AggregatorThread*>(ctx)->run();
+   auto* self = static_cast<AggregatorThread*>(ctx);
+   self->run();
+   self->_completion.set(FLAG_STOPPED);
 }
 
 void AggregatorThread::run()
 {
    LOGI(TAG, "Thread started");
 
-   while (true)
+   while (!_stopRequested.load())
    {
       if (!_enabled.load())
       {
          _flags.wait_any(FLAG_WAKE);
          _flags.clear(FLAG_WAKE);
+         if (_stopRequested.load())
+         {
+            break;
+         }
+         continue;
+      }
+
+      SensorSampleMsg* staleSample = nullptr;
+      while ((staleSample = _inMail.try_get()) != nullptr)
+      {
+         _inMail.free(staleSample);
+      }
+
+      if (!_enabled.load())
+      {
          continue;
       }
 
@@ -146,7 +165,7 @@ void AggregatorThread::run()
 
       const uint32_t startWall = millis();
 
-      while (_enabled.load())
+      while (_enabled.load() && !_stopRequested.load())
       {
          SensorSampleMsg* sm = _inMail.try_get_for(milliseconds(50));
          if (sm != nullptr)
@@ -160,6 +179,19 @@ void AggregatorThread::run()
          {
             break;
          }
+      }
+
+      if (_stopRequested.load())
+      {
+         break;
+      }
+      if (!_enabled.load())
+      {
+         while ((staleSample = _inMail.try_get()) != nullptr)
+         {
+            _inMail.free(staleSample);
+         }
+         continue;
       }
 
       AggregateMsg out;
@@ -186,5 +218,11 @@ void AggregatorThread::run()
       w.n     = out.n;
       w.ok    = out.ok;
       _eventBus.publishWorker(w);
+   }
+
+   SensorSampleMsg* sample = nullptr;
+   while ((sample = _inMail.try_get()) != nullptr)
+   {
+      _inMail.free(sample);
    }
 }

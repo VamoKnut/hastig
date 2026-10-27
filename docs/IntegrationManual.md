@@ -146,6 +146,7 @@ Recognized keys:
 - `sensorBaudrate` (uint32)
 - `sensorWarmupMs` (uint32)
 - `sensorType` (uint32)
+- `keyboardLayout` (string: `PCB_Buttons` | `Membran_Buttons`)
 - `samplingInterval` (uint32, ms)
 - `aggPeriodS` (uint32, s)
 - `aggregationMethod` (string; currently accepted but not functionally used)
@@ -169,6 +170,9 @@ Recognized keys:
 - `emergencySleepS` (uint32)
 - `maxForcedSleepS` (uint32)
 - `maxUnackedPackets` (uint32)
+
+Seconds-based runtime intervals are limited to 12 hours to keep millisecond
+conversions safe. `aggPeriodS` values of zero are raised to one second.
 
 Example:
 
@@ -339,28 +343,31 @@ Button behavior:
 
 ### 3.3 Setup submenu
 
-Numeric/select items:
+Select items:
 
-1. `Sensor address` -> `sensorAddress` options: `1..9`
-2. `Sensor baudrate` -> `sensorBaudrate` options:
+1. `Keyboard layout` -> `keyboardLayout` options: `PCB_Buttons`, `Membran_Buttons`
+   - Default: `Membran_Buttons`
+   - `Membran_Buttons` reverses Left/Right and Up/Down relative to `PCB_Buttons`
+2. `Sensor address` -> `sensorAddress` options: `1..9`
+3. `Sensor baudrate` -> `sensorBaudrate` options:
    - `1200, 4800, 9600, 19200, 38400, 57600, 115200`
-3. `Sensor warmup (ms)` -> `sensorWarmupMs` options:
+4. `Sensor warmup (ms)` -> `sensorWarmupMs` options:
    - `500, 1000, 2000, 4000, 5000, 10000`
-4. `Sensor type` -> `sensorType` options:
+5. `Sensor type` -> `sensorType` options:
    - `0, 1, 2`
-5. `Sampling interval` -> `samplingInterval` options:
+6. `Sampling interval` -> `samplingInterval` options:
    - `250, 500, 750, 1000, 2000, 5000, 10000`
-6. `Agg period (s)` -> `aggPeriodS` options:
+7. `Agg period (s)` -> `aggPeriodS` options:
    - `10, 15, 20, 30, 60, 120, 300, 600`
-7. `Aware timeout (s)` -> `awareTimeoutS` options:
+9. `Aware timeout (s)` -> `awareTimeoutS` options:
    - `60, 300, 600, 900, 1800, 3600`
-8. `Default sleep (s)` -> `defaultSleepS` options:
+10. `Default sleep (s)` -> `defaultSleepS` options:
    - `600, 900, 1800, 3600`
-9. `Status interval (s)` -> `statusIntervalS` options:
+11. `Status interval (s)` -> `statusIntervalS` options:
    - `60, 120, 300, 600, 900, 1800`
-10. `Max charge current` -> `maxChargingCurrent` options:
+12. `Max charge current` -> `maxChargingCurrent` options:
     - `250, 500, 750, 1000`
-11. `Max charge volt` -> `maxChargingVoltage` options:
+13. `Max charge volt` -> `maxChargingVoltage` options:
     - `3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2`
 
 Text editor items:

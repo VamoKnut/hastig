@@ -59,7 +59,7 @@ static constexpr osPriority PRIO_ORCH  = osPriorityNormal;
 static constexpr osPriority PRIO_COMMS = osPriorityAboveNormal;
 static constexpr osPriority PRIO_AGG   = osPriorityNormal;
 static constexpr osPriority PRIO_SENS  = osPriorityNormal;
-static constexpr osPriority PRIO_UI    = osPriorityLow;
+static constexpr osPriority PRIO_UI    = osPriorityAboveNormal;
 
 // ---------------- Thread stacks ----------------
 static constexpr uint32_t STACK_ORCH  = 6 * 1024;

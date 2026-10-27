@@ -26,10 +26,10 @@ public:
              RuntimeStatus& runtimeStatus);
 
   /**
-   * @brief Start RTOS thread.
+   * @brief Start the sensor worker.
    */
   void start();
-  void stop();
+  bool stop(uint32_t timeoutMs = 10000u);
 
   /**
    * @brief Enable or disable sampling.
@@ -45,10 +45,13 @@ private:
 
   rtos::Thread     _thread;
   rtos::EventFlags _flags;
+  rtos::EventFlags _completion;
 
   static constexpr uint32_t FLAG_WAKE = 1u << 0;
+  static constexpr uint32_t FLAG_STOPPED = 1u << 0;
 
   std::atomic<bool> _enabled{false};
+  std::atomic<bool> _stopRequested{false};
 
   Sensor* _sensor = nullptr;
 

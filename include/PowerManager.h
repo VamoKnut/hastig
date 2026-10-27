@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <atomic>
 #include <mbed.h>
 
 #include "RestartReason.h"
@@ -61,7 +60,11 @@ private:
 
   const PinName _wakePin;
 
-  std::atomic_bool _pending{false};
-  std::atomic_bool _inProgress{false};
+  rtos::Mutex _requestMutex;
+  bool _pending = false;
+  bool _inProgress = false;
+  bool _commsPrepared = false;
   SleepRequest _req{};
+
+  void deferSleep(const SleepRequest& request);
 };

@@ -3,10 +3,9 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// Small Arduino Wire driver for the Kinetic Technologies KTD2052.
-// RGB index is 1..4, raw current is 0..192 (0..24mA in normal mode).
-// No Wire.begin() is performed by this driver; the application owns the bus.
-class KTD2052 {
+// Controls four individual RGB LEDs connected to the I2C bus through a KTD2052
+// LED driver. No Wire.begin() is performed; the application owns the bus.
+class RgbLedStrip {
 public:
     static constexpr uint8_t ADDRESS_AB = 0x74;
     static constexpr uint8_t ADDRESS_CD = 0x75;
@@ -18,7 +17,7 @@ public:
         Ms500 = 4, Sec1 = 5, Sec2 = 6, Sec4 = 7
     };
 
-    explicit KTD2052(TwoWire& wire = Wire, uint8_t address = ADDRESS_AB);
+    explicit RgbLedStrip(TwoWire& wire = Wire, uint8_t address = ADDRESS_AB);
 
     // Configure chip for independent software-controlled RGB outputs.
     // Resets chip registers (including any previous pattern) and turns LEDs off.

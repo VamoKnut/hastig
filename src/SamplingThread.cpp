@@ -2,7 +2,6 @@
 
 #include "Logger.h"
 #include "BoardHal.h"
-#include "StopUtil.h"
 #include <Arduino.h>
 #include <chrono>
 #include <string.h>
@@ -11,6 +10,33 @@
 using namespace std::chrono;
 
 static const char* TAG = "SENS";
+
+namespace
+{
+AppSettings readSettingsSnapshot(SettingsManager& settings, uint32_t& revision)
+{
+   AppSettings snapshot;
+   do
+   {
+      revision = settings.revision();
+      snapshot = settings.getCopy();
+   } while (revision != settings.revision());
+   return snapshot;
+}
+
+bool sensorConfigurationChanged(const AppSettings& current, const AppSettings& updated)
+{
+   return current.sensor_type != updated.sensor_type ||
+          current.sensor_addr != updated.sensor_addr ||
+          current.sensor_baud != updated.sensor_baud ||
+          current.sensor_warmup_ms != updated.sensor_warmup_ms;
+}
+
+uint32_t waitSlice(uint32_t remainingMs)
+{
+   return remainingMs < 200u ? remainingMs : 200u;
+}
+} // namespace
 
 SamplingThread::SamplingThread(SensorMail<QUEUE_DEPTH_SENSOR_TO_AGG>& outMail,
                                SettingsManager& settings, SessionClock& clock, EventBus& eventBus,
@@ -33,9 +59,12 @@ void SamplingThread::start()
    _thread.set_priority(PRIO_SENS);
 }
 
-void SamplingThread::stop()
+bool SamplingThread::stop(uint32_t timeoutMs)
 {
-   stoputil::terminateThread("SamplingThread", _thread);
+   _stopRequested.store(true);
+   _enabled.store(false);
+   _flags.set(FLAG_WAKE);
+   return (_completion.wait_any(FLAG_STOPPED, timeoutMs, false) & FLAG_STOPPED) != 0u;
 }
 
 /**
@@ -49,7 +78,9 @@ void SamplingThread::setEnabled(bool en)
 
 void SamplingThread::threadEntry(void* ctx)
 {
-   static_cast<SamplingThread*>(ctx)->run();
+   auto* self = static_cast<SamplingThread*>(ctx);
+   self->run();
+   self->_completion.set(FLAG_STOPPED);
 }
 
 void SamplingThread::run()
@@ -59,19 +90,52 @@ void SamplingThread::run()
    const uint32_t     stackSpace = osThreadGetStackSpace(tid);
    LOGI(TAG, "Thread started (stack size=%lu free=%lu)", (unsigned long)stackSize, (unsigned long)stackSpace);
 
-   while (true)
+   while (!_stopRequested.load())
    {
-      _flags.wait_any(FLAG_WAKE);
-      _flags.clear(FLAG_WAKE);
-
       if (!_enabled.load())
       {
+         _flags.wait_any(FLAG_WAKE);
+         _flags.clear(FLAG_WAKE);
          continue;
       }
 
-      const AppSettings s = _settings.getCopy();
+      uint32_t settingsRevision = 0;
+      AppSettings settings = readSettingsSnapshot(_settings, settingsRevision);
       BoardHal::setSensorPower(true);
-      rtos::ThisThread::sleep_for(milliseconds(s.sensor_warmup_ms));
+
+      bool restartForSettings = false;
+      const uint32_t warmupStart = millis();
+      while (_enabled.load() && !_stopRequested.load() &&
+             (uint32_t)(millis() - warmupStart) < settings.sensor_warmup_ms)
+      {
+         const uint32_t elapsed = millis() - warmupStart;
+         (void)_flags.wait_any(FLAG_WAKE, waitSlice(settings.sensor_warmup_ms - elapsed));
+         _flags.clear(FLAG_WAKE);
+
+         if (_settings.revision() != settingsRevision)
+         {
+            uint32_t updatedRevision = 0;
+            const AppSettings updated = readSettingsSnapshot(_settings, updatedRevision);
+            restartForSettings = sensorConfigurationChanged(settings, updated);
+            settings = updated;
+            settingsRevision = updatedRevision;
+            if (restartForSettings)
+            {
+               break;
+            }
+         }
+      }
+
+      if (_stopRequested.load() || !_enabled.load())
+      {
+         BoardHal::setSensorPower(false);
+         continue;
+      }
+      if (restartForSettings)
+      {
+         BoardHal::setSensorPower(false);
+         continue;
+      }
 
       if (_sensor != nullptr)
       {
@@ -80,40 +144,54 @@ void SamplingThread::run()
          _sensor = nullptr;
       }
 
-      LOGI(TAG, "Creating sensor type=%lu", (unsigned long)s.sensor_type);
+      LOGI(TAG, "Creating sensor type=%lu", (unsigned long)settings.sensor_type);
 
-      _sensor = Sensor::create(s.sensor_type);
+      _sensor = Sensor::create(settings.sensor_type);
       if (_sensor == nullptr)
       {
          LOGE(TAG, "Sensor create failed");
          BoardHal::setSensorPower(false);
+         (void)_flags.wait_any(FLAG_WAKE, 1000u);
+         _flags.clear(FLAG_WAKE);
          continue;
       }
 
-      if (!_sensor->begin(s))
+      if (!_sensor->begin(settings))
       {
          LOGE(TAG, "Sensor begin failed (%s)", _sensor->name());
          _sensor->end();
          delete _sensor;
          _sensor = nullptr;
          BoardHal::setSensorPower(false);
+         (void)_flags.wait_any(FLAG_WAKE, 1000u);
+         _flags.clear(FLAG_WAKE);
          continue;
       }
 
-      uint32_t periodMs = s.sample_period_ms;
-      if (periodMs < MIN_SAMPLE_PERIOD_MS)
-      {
-         periodMs = MIN_SAMPLE_PERIOD_MS;
-      }
-
-      while (_enabled.load())
+      restartForSettings = false;
+      while (_enabled.load() && !_stopRequested.load())
       {
          SensorSampleMsg tmp;
          memset(&tmp, 0, sizeof(tmp));
          tmp.relMs     = _clock.relMs();
          const bool ok = _sensor->sample(tmp);
          tmp.ok        = ok;
-         if (tmp.ok)
+
+         if (_settings.revision() != settingsRevision)
+         {
+            uint32_t updatedRevision = 0;
+            const AppSettings updated = readSettingsSnapshot(_settings, updatedRevision);
+            restartForSettings = sensorConfigurationChanged(settings, updated);
+            settings = updated;
+            settingsRevision = updatedRevision;
+         }
+
+         if (restartForSettings)
+         {
+            break;
+         }
+
+         if (_enabled.load() && !_stopRequested.load() && tmp.ok)
          {
             _runtimeStatus.setLastSample(tmp);
             SensorSampleMsg* m = _outMail.try_alloc();
@@ -138,15 +216,41 @@ void SamplingThread::run()
                LOGW(TAG, "Drop sample: mail full");
             }
          }
-         else
+         else if (_enabled.load() && !_stopRequested.load())
          {
             LOGW(TAG, "Get sample failed");
          }
 
-         // Always yield here so main loop and comms get scheduling opportunities.
-         rtos::ThisThread::sleep_for(milliseconds(1));
+         const uint32_t waitStart = millis();
+         while (_enabled.load() && !_stopRequested.load())
+         {
+            const uint32_t elapsed = millis() - waitStart;
+            if (elapsed >= settings.sample_period_ms)
+            {
+               break;
+            }
 
-         rtos::ThisThread::sleep_for(milliseconds(periodMs));
+            (void)_flags.wait_any(FLAG_WAKE, waitSlice(settings.sample_period_ms - elapsed));
+            _flags.clear(FLAG_WAKE);
+
+            if (_settings.revision() != settingsRevision)
+            {
+               uint32_t updatedRevision = 0;
+               const AppSettings updated = readSettingsSnapshot(_settings, updatedRevision);
+               restartForSettings = sensorConfigurationChanged(settings, updated);
+               settings = updated;
+               settingsRevision = updatedRevision;
+               if (restartForSettings)
+               {
+                  break;
+               }
+            }
+         }
+
+         if (restartForSettings)
+         {
+            break;
+         }
       }
 
       if (_sensor != nullptr)
@@ -158,4 +262,12 @@ void SamplingThread::run()
 
       BoardHal::setSensorPower(false);
    }
+
+   if (_sensor != nullptr)
+   {
+      _sensor->end();
+      delete _sensor;
+      _sensor = nullptr;
+   }
+   BoardHal::setSensorPower(false);
 }

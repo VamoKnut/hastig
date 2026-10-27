@@ -55,10 +55,10 @@ public:
                    EventBus& eventBus);
 
   /**
-   * @brief Start RTOS thread.
+   * @brief Start the aggregation worker.
    */
   void start();
-  void stop();
+  bool stop(uint32_t timeoutMs = 5000u);
 
   /**
    * @brief Enable or disable aggregation.
@@ -81,12 +81,13 @@ private:
 
   rtos::Thread     _thread;
   rtos::EventFlags _flags;
+  rtos::EventFlags _completion;
 
   static constexpr uint32_t FLAG_WAKE  = 1u << 0;
-  static constexpr uint32_t FLAG_RESET = 1u << 1;
+  static constexpr uint32_t FLAG_STOPPED = 1u << 0;
 
   std::atomic<bool> _enabled{false};
+  std::atomic<bool> _stopRequested{false};
 
-  AggregateAccumulator _acc;
   void run();
 };

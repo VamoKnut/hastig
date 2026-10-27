@@ -5,7 +5,6 @@
 #include "MenuDef.h"
 #include "TimeUtil.h"
 #include "BoardHal.h"
-#include "StopUtil.h"
 #include <Arduino.h>
 #include <platform/ScopedLock.h>
 #include <cmsis_os2.h>
@@ -16,8 +15,12 @@ using namespace std::chrono;
 static const char* TAG = "UI";
 
 namespace {
-BoardHal::Button toApplicationButton(BoardHal::Button physicalButton)
+BoardHal::Button toApplicationButton(BoardHal::Button physicalButton, const AppSettings& settings)
 {
+  if (strcmp(settings.keyboard_layout, "Membran_Buttons") == 0) {
+    return physicalButton;
+  }
+
   switch (physicalButton) {
     case BoardHal::Button::Left:
       return BoardHal::Button::Right;
@@ -50,7 +53,7 @@ UiThread::UiThread(EventBus& eventBus, SettingsManager& settings, RuntimeStatus&
 void UiThread::start()
 {
   _thread.start(mbed::callback(UiThread::threadEntry, this));
-  _thread.set_priority(osPriorityAboveNormal);
+  _thread.set_priority(PRIO_UI);
 }
 
 /**
@@ -91,7 +94,9 @@ void UiThread::onItemSelectedEvent(const JsonVariantConst itemRetVal)
  */
 void UiThread::threadEntry(void* ctx)
 {
-  static_cast<UiThread*>(ctx)->run();
+  auto* self = static_cast<UiThread*>(ctx);
+  self->run();
+  self->_completion.set(FLAG_STOPPED);
 }
 
 /**
@@ -142,13 +147,14 @@ void UiThread::run()
   _statusMode = true;
   renderStatus();
 
-  while (true) {
+  while (!_stopRequested.load()) {
     // Wait for button activity or periodic wakeup.
     (void)BoardHal::waitForButtonEvent(200);
 
     BoardHal::Button b;
     while (BoardHal::popButton(b)) {
-      const BoardHal::Button appButton = toApplicationButton(b);
+      const AppSettings settings = _settings.getCopy();
+      const BoardHal::Button appButton = toApplicationButton(b, settings);
       post_key(appButton);
 
       if (_statusMode) {
@@ -182,9 +188,10 @@ void UiThread::run()
   }
 }
 
-void UiThread::stop()
+bool UiThread::stop(uint32_t timeoutMs)
 {
-  stoputil::terminateThread("UiThread", _thread);
+  _stopRequested.store(true);
+  return (_completion.wait_any(FLAG_STOPPED, timeoutMs, false) & FLAG_STOPPED) != 0u;
 }
 
 LcdMenu::Key UiThread::toMenuKey(BoardHal::Button b) const

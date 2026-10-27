@@ -11,7 +11,7 @@
  * @brief Hastig settings stored in flash.
  */
 struct AppSettings {
-  uint32_t version = 1;
+  uint32_t version = 2;
 
   // Sensor serial settings
   uint8_t  sensor_addr = 1;
@@ -52,6 +52,9 @@ struct AppSettings {
   uint32_t emergency_sleep_s   = 43200;
   uint32_t max_forced_sleep_s  = 43200;
   uint32_t max_unacked_packets = 10;
+
+  // Physical button arrangement: "PCB_Buttons" or "Membran_Buttons".
+  char keyboard_layout[20] = "Membran_Buttons";
 };
 
 /**
@@ -122,6 +125,7 @@ private:
   uint32_t            _revision = 0;
 
   bool loadFromFlash();
+  bool saveUnlocked();
   void setDefaults();
   void clampRuntimeSettingsUnlocked();
 

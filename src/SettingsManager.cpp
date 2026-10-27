@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include "AppConfig.h"
 #include <Arduino.h>
+#include <stddef.h>
 #include <platform/ScopedLock.h>
 #include <mbed.h>
 #include <math.h>
@@ -17,6 +18,7 @@ static constexpr uint32_t kDefaultSleepS      = 3600u;
 static constexpr uint32_t kMinStatusIntervalS = 30u;
 static constexpr uint32_t kDefaultStatusIntervalS = 120u;
 static constexpr uint32_t kMaxSleepDurationS  = 43200u;
+static constexpr uint32_t kMaxIntervalS = 43200u;
 
 namespace {
 bool parseDoubleFromText(const char* text, double& out)
@@ -127,7 +129,10 @@ void SettingsManager::begin()
 
   if (!loadFromFlash()) {
     setDefaults();
-    (void)save();
+    (void)saveUnlocked();
+  } else if (_s.version != 2u) {
+    _s.version = 2u;
+    (void)saveUnlocked();
   }
 
   clampRuntimeSettingsUnlocked();
@@ -179,6 +184,10 @@ bool SettingsManager::applyJson(const char* json, bool persist)
   }
   if (doc["sensorType"].is<uint32_t>()) {
     _s.sensor_type = doc["sensorType"].as<uint32_t>();
+  }
+  if (doc["keyboardLayout"].is<const char*>()) {
+    strncpy(_s.keyboard_layout, doc["keyboardLayout"].as<const char*>(), sizeof(_s.keyboard_layout));
+    _s.keyboard_layout[sizeof(_s.keyboard_layout) - 1] = '\0';
   }
 
   if (doc["samplingInterval"].is<uint32_t>()) {
@@ -268,7 +277,7 @@ bool SettingsManager::applyJson(const char* json, bool persist)
   _revision++;
 
   if (persist) {
-    return save();
+    return saveUnlocked();
   }
   return true;
 }
@@ -279,7 +288,11 @@ bool SettingsManager::applyJson(const char* json, bool persist)
 bool SettingsManager::save()
 {
   mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  return saveUnlocked();
+}
 
+bool SettingsManager::saveUnlocked()
+{
   mbed::FlashIAP flash;
   if (flash.init() != 0) {
     LOGE(TAG, "Flash init failed");
@@ -346,12 +359,21 @@ bool SettingsManager::loadFromFlash()
 
   const uint32_t got = blob->crc;
   const uint32_t exp = crc32((const uint8_t*)&blob->settings, sizeof(blob->settings));
-  if (got != exp) {
-    flash.deinit();
-    return false;
+  if (got == exp) {
+    _s = blob->settings;
+  } else {
+    // Older blobs end at the new field; preserve their settings and use its default.
+    const size_t legacySize = offsetof(AppSettings, keyboard_layout);
+    const uint32_t legacyExp = crc32((const uint8_t*)&blob->settings, legacySize);
+    if (got != legacyExp) {
+      flash.deinit();
+      return false;
+    }
+
+    _s = AppSettings{};
+    memcpy(&_s, &blob->settings, legacySize);
   }
 
-  _s = blob->settings;
   flash.deinit();
   return true;
 }
@@ -372,18 +394,36 @@ void SettingsManager::clampRuntimeSettingsUnlocked()
     _s.sample_period_ms = MIN_SAMPLE_PERIOD_MS;
   }
 
+  if (_s.agg_period_s == 0u) {
+    _s.agg_period_s = 1u;
+  } else if (_s.agg_period_s > kMaxIntervalS) {
+    _s.agg_period_s = kMaxIntervalS;
+  }
+
   if (_s.aware_timeout_s < kMinAwareTimeoutS) {
     _s.aware_timeout_s = kDefaultAwareTimeoutS;
+  } else if (_s.aware_timeout_s > kMaxIntervalS) {
+    _s.aware_timeout_s = kMaxIntervalS;
   }
   if (_s.default_sleep_s < kMinDefaultSleepS) {
     _s.default_sleep_s = kDefaultSleepS;
   }
   if (_s.status_interval_s < kMinStatusIntervalS) {
     _s.status_interval_s = kDefaultStatusIntervalS;
+  } else if (_s.status_interval_s > kMaxIntervalS) {
+    _s.status_interval_s = kMaxIntervalS;
+  }
+  if (_s.emergency_delay_s > kMaxIntervalS) {
+    _s.emergency_delay_s = kMaxIntervalS;
   }
 
   if (_s.sensor_addr == 0u || _s.sensor_addr > 247u) {
     _s.sensor_addr = 1u;
+  }
+  if (strcmp(_s.keyboard_layout, "PCB_Buttons") != 0 &&
+      strcmp(_s.keyboard_layout, "Membran_Buttons") != 0) {
+    strncpy(_s.keyboard_layout, "Membran_Buttons", sizeof(_s.keyboard_layout));
+    _s.keyboard_layout[sizeof(_s.keyboard_layout) - 1] = '\0';
   }
   if (_s.max_forced_sleep_s == 0u || _s.max_forced_sleep_s > kMaxSleepDurationS) {
     _s.max_forced_sleep_s = kMaxSleepDurationS;
@@ -409,7 +449,7 @@ void SettingsManager::factoryReset()
   mbed::ScopedLock<rtos::Mutex> lock(_mx);
   setDefaults();
   _revision++;
-  (void)save();
+  (void)saveUnlocked();
 }
 
 uint32_t SettingsManager::revision() const
@@ -449,6 +489,7 @@ void SettingsManager::addMaskedConfigFields(JsonDocument& doc, ConfigSection sec
     doc["sensorBaudrate"] = s.sensor_baud;
     doc["sensorWarmupMs"] = s.sensor_warmup_ms;
     doc["sensorType"]     = s.sensor_type;
+    doc["keyboardLayout"] = s.keyboard_layout;
   }
 
   if (includeAll || section == ConfigSection::Schedule) {
@@ -495,6 +536,10 @@ bool SettingsManager::onIsItemSelectedEvent(const JsonVariantConst itemRetVal)
   }
   if (strcmp(prop, "sensorType") == 0) {
     return numericEqualsInteger(valueNode, s.sensor_type);
+  }
+  if (strcmp(prop, "keyboardLayout") == 0) {
+    const char* selectedLayout = valueNode | "";
+    return strcmp(selectedLayout, s.keyboard_layout) == 0;
   }
   if (strcmp(prop, "samplingInterval") == 0) {
     return numericEqualsInteger(valueNode, s.sample_period_ms);

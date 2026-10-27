@@ -2,6 +2,7 @@
 
 #include <mbed.h>
 #include <stdint.h>
+#include <atomic>
 
 class EventBus;
 class CommsEgress;
@@ -42,7 +43,7 @@ public:
    * @brief Start orchestrator RTOS thread.
    */
   void start();
-  void stop();
+  bool stop(uint32_t timeoutMs = 3000u);
 
 private:
   enum class State : uint8_t { Aware, Sampling, Hibernating };
@@ -61,6 +62,9 @@ private:
   RestartReasonStore& _restartReason;
 
   rtos::Thread _thread;
+  rtos::EventFlags _completion;
+  std::atomic<bool> _stopRequested{false};
+  static constexpr uint32_t FLAG_STOPPED = 1u << 0;
 
   State    _state          = State::Aware;
   uint32_t _stateEnterMs   = 0;
