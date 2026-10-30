@@ -185,11 +185,6 @@ bool SettingsManager::applyJson(const char* json, bool persist)
   if (doc["sensorType"].is<uint32_t>()) {
     _s.sensor_type = doc["sensorType"].as<uint32_t>();
   }
-  if (doc["keyboardLayout"].is<const char*>()) {
-    strncpy(_s.keyboard_layout, doc["keyboardLayout"].as<const char*>(), sizeof(_s.keyboard_layout));
-    _s.keyboard_layout[sizeof(_s.keyboard_layout) - 1] = '\0';
-  }
-
   if (doc["samplingInterval"].is<uint32_t>()) {
     _s.sample_period_ms = doc["samplingInterval"].as<uint32_t>();
   }
@@ -362,16 +357,22 @@ bool SettingsManager::loadFromFlash()
   if (got == exp) {
     _s = blob->settings;
   } else {
-    // Older blobs end at the new field; preserve their settings and use its default.
-    const size_t legacySize = offsetof(AppSettings, keyboard_layout);
-    const uint32_t legacyExp = crc32((const uint8_t*)&blob->settings, legacySize);
-    if (got != legacyExp) {
+    constexpr size_t legacyLayoutSize = 20u;
+    const size_t legacyPrefixSize = sizeof(AppSettings);
+    const size_t legacyFullSize = legacyPrefixSize + legacyLayoutSize;
+    const uint8_t* storedSettings =
+        reinterpret_cast<const uint8_t*>(base + offsetof(StoredBlob, settings));
+    const uint32_t legacyPrefixCrc =
+        crc32(storedSettings, legacyPrefixSize);
+    const uint32_t legacyFullCrc =
+        crc32(storedSettings, legacyFullSize);
+    if (got != legacyPrefixCrc && got != legacyFullCrc) {
       flash.deinit();
       return false;
     }
 
     _s = AppSettings{};
-    memcpy(&_s, &blob->settings, legacySize);
+    memcpy(&_s, storedSettings, legacyPrefixSize);
   }
 
   flash.deinit();
@@ -419,11 +420,6 @@ void SettingsManager::clampRuntimeSettingsUnlocked()
 
   if (_s.sensor_addr == 0u || _s.sensor_addr > 247u) {
     _s.sensor_addr = 1u;
-  }
-  if (strcmp(_s.keyboard_layout, "PCB_Buttons") != 0 &&
-      strcmp(_s.keyboard_layout, "Membran_Buttons") != 0) {
-    strncpy(_s.keyboard_layout, "Membran_Buttons", sizeof(_s.keyboard_layout));
-    _s.keyboard_layout[sizeof(_s.keyboard_layout) - 1] = '\0';
   }
   if (_s.max_forced_sleep_s == 0u || _s.max_forced_sleep_s > kMaxSleepDurationS) {
     _s.max_forced_sleep_s = kMaxSleepDurationS;
@@ -489,7 +485,6 @@ void SettingsManager::addMaskedConfigFields(JsonDocument& doc, ConfigSection sec
     doc["sensorBaudrate"] = s.sensor_baud;
     doc["sensorWarmupMs"] = s.sensor_warmup_ms;
     doc["sensorType"]     = s.sensor_type;
-    doc["keyboardLayout"] = s.keyboard_layout;
   }
 
   if (includeAll || section == ConfigSection::Schedule) {
@@ -536,10 +531,6 @@ bool SettingsManager::onIsItemSelectedEvent(const JsonVariantConst itemRetVal)
   }
   if (strcmp(prop, "sensorType") == 0) {
     return numericEqualsInteger(valueNode, s.sensor_type);
-  }
-  if (strcmp(prop, "keyboardLayout") == 0) {
-    const char* selectedLayout = valueNode | "";
-    return strcmp(selectedLayout, s.keyboard_layout) == 0;
   }
   if (strcmp(prop, "samplingInterval") == 0) {
     return numericEqualsInteger(valueNode, s.sample_period_ms);

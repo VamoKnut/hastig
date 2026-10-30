@@ -9,15 +9,13 @@
 /**
  * @brief Centralized mailbox ownership.
  *
- * This keeps the "wiring" in one place and makes later migration to a bus-like
- * mechanism easier, while preserving current behavior.
+ * This keeps mailbox ownership in one place and limits shared queues to
+ * producer/consumer boundaries.
  */
 struct SystemMailboxes {
   rtos::Mail<SensorSampleMsg, QUEUE_DEPTH_SENSOR_TO_AGG> sensorToAggMail;
   rtos::Mail<AggregateMsg, QUEUE_DEPTH_AGG_TO_COMMS>     aggToCommsMail;
 
-  rtos::Mail<UiEventMsg, QUEUE_DEPTH_UI_TO_ORCH>        uiToOrchMail;
-  rtos::Mail<CommsEventMsg, QUEUE_DEPTH_COMMS_TO_ORCH>  commsToOrchMail;
-  rtos::Mail<WorkerEventMsg, QUEUE_DEPTH_WORKER_TO_ORCH> workerToOrchMail;
+  rtos::Mail<DeviceEvent, QUEUE_DEPTH_ORCH_EVENTS>      eventsToOrchMail;
   rtos::Mail<OrchCommandMsg, QUEUE_DEPTH_ORCH_TO_COMMS> orchToCommsMail;
 };

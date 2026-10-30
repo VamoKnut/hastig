@@ -201,15 +201,6 @@ void SamplingThread::run()
                _outMail.put(m);
                LOGD(TAG, "Produced sample t=%lu %s=%.2f %s=%.2f ok=%d", (unsigned long)m->relMs, m->k0,
                     (double)m->v0, m->k1, (double)m->v1, m->ok ? 1 : 0);
-
-               WorkerEventMsg w;
-               memset(&w, 0, sizeof(w));
-               w.type  = WorkerEventType::SampleTaken;
-               w.ts_ms = millis();
-               w.relMs = tmp.relMs;
-               w.n     = 1;
-               w.ok    = ok;
-               _eventBus.publishWorker(w);
             }
             else
             {

@@ -46,26 +46,6 @@ struct AggregateMsg {
 };
 
 /**
- * @brief Lightweight worker events for orchestrator visibility.
- *
- * These are intentionally small and do not replace the existing data
- * mailboxes (sensor->agg, agg->comms). They provide observability and a
- * single event stream in the orchestrator.
- */
-enum class WorkerEventType : uint8_t {
-  SampleTaken,
-  AggregateReady,
-};
-
-struct WorkerEventMsg {
-  WorkerEventType type;
-  uint32_t        ts_ms;
-  uint32_t        relMs;
-  uint32_t        n;
-  bool            ok;
-};
-
-/**
  * @brief Events from comms thread to orchestrator.
  */
 enum class CommsEventType : uint8_t {
@@ -84,4 +64,17 @@ struct CommsEventMsg {
   uint32_t       ts_ms;
   char           topic[64];
   char           payload[256];
+};
+
+/**
+ * @brief Typed event delivered to the orchestrator.
+ */
+struct DeviceEvent {
+  enum class Type : uint8_t { Ui, Comms };
+
+  Type type;
+  union {
+    UiEventMsg ui;
+    CommsEventMsg comms;
+  } data;
 };

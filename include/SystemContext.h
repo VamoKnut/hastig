@@ -54,7 +54,7 @@ struct SystemContext {
   SystemContext(Board& board, RestartReasonStore& rrStore, PinName wakePin)
       : settings(),
         sessionClock(),
-        eventBus(mailboxes.uiToOrchMail, mailboxes.commsToOrchMail, mailboxes.workerToOrchMail),
+        eventBus(mailboxes.eventsToOrchMail),
         commandBus(mailboxes.orchToCommsMail),
         commsEgress(commandBus, mailboxes.aggToCommsMail),
         uiThread(eventBus, settings, runtimeStatus),

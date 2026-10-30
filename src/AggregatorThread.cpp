@@ -209,15 +209,6 @@ void AggregatorThread::run()
       }
 
       LOGI(TAG, "Produced aggregate %s/%s n=%lu", out.k0, out.k1, (unsigned long)out.n);
-
-      WorkerEventMsg w;
-      memset(&w, 0, sizeof(w));
-      w.type  = WorkerEventType::AggregateReady;
-      w.ts_ms = millis();
-      w.relMs = out.rel_end_ms;
-      w.n     = out.n;
-      w.ok    = out.ok;
-      _eventBus.publishWorker(w);
    }
 
    SensorSampleMsg* sample = nullptr;

@@ -20,7 +20,7 @@ Main entry points:
 - `Orchestrator` (`src/Orchestrator.cpp`)
   - Device state machine (`aware`, `sampling`, `hibernating`)
   - Command handling
-  - Timeout logic (inactivity, no-network, unacked aggregate fallback)
+  - Timeout logic (inactivity, no-network, and sampling acknowledgement fallback)
 - `CommsPump` (`src/CommsPump.cpp`)
   - GSM + MQTT connectivity
   - MQTT subscribe/publish
@@ -37,6 +37,8 @@ Main entry points:
 - `SettingsManager` (`src/SettingsManager.cpp`)
   - Thread-safe runtime settings
   - Flash persistence
+- `ModbusRtuMaster` (`src/ModbusRtuMaster.cpp`)
+  - Reusable RS485/Modbus RTU transport; configured with pin names by its owner
 - `PowerManager` (`src/PowerManager.cpp`)
   - Executes controlled sleep transaction
 
@@ -44,8 +46,9 @@ Main entry points:
 
 1. Sensor pipeline:
    - `SamplingThread` -> mailbox `sensorToAggMail` -> `AggregatorThread` -> mailbox `aggToCommsMail` -> `CommsPump` -> MQTT `/data`
-2. Command pipeline:
-   - MQTT `/cmd` -> `CommsPump` -> `EventBus` -> `Orchestrator`
+2. Orchestrator event pipeline:
+   - UI and CommsPump -> one FIFO `EventBus` mailbox -> `Orchestrator`
+   - MQTT `/cmd` messages are forwarded through this event channel.
 3. Remote config pipeline:
    - MQTT `/cfg` -> `CommsPump` -> `SettingsManager.applyJson(..., persist=true)`
 4. Local UI setup pipeline:
@@ -56,15 +59,25 @@ Main entry points:
 - `aware`
   - Network connected, waiting for commands
   - Periodic status reporting
+  - Checks fuel-gauge current every five seconds; RGB LED 4 flashes green at 0.5 Hz when charging current is above +5 mA
 - `sampling`
   - Sampling + aggregation enabled
   - Sends aggregate packets
-  - Returns to `aware` if `maxUnackedPackets` attempted publishes occur without `keepSampling`
+  - Returns to `aware` if `maxUnackedPackets` publish attempts or equivalent aggregation periods pass without `keepSampling`
 - `hibernating`
   - Publish hibernation status/mode change
   - `PowerManager` performs sleep sequence
 
-### 1.5 MQTT topic model
+### 1.5 RGB LED strip indicators
+
+- LED 1 indicates cellular connection state.
+- LED 2 flashes green for outgoing MQTT publishes and blue for received MQTT messages; each flash lasts 200 ms.
+- LED 3 indicates sensor power.
+- LED 4 flashes green at 0.5 Hz in `aware` mode when fuel-gauge current is above +5 mA (charging).
+
+The M7 PlatformIO environment takes its displayed firmware revision from `build.counter`. Each M7 PlatformIO build uses the current counter and advances it for the next build. The generated revision header is included only by `main.cpp`, so counter changes do not force a full firmware rebuild.
+
+### 1.6 MQTT topic model
 
 Topic format:
 
@@ -146,7 +159,6 @@ Recognized keys:
 - `sensorBaudrate` (uint32)
 - `sensorWarmupMs` (uint32)
 - `sensorType` (uint32)
-- `keyboardLayout` (string: `PCB_Buttons` | `Membran_Buttons`)
 - `samplingInterval` (uint32, ms)
 - `aggPeriodS` (uint32, s)
 - `aggregationMethod` (string; currently accepted but not functionally used)
@@ -173,6 +185,9 @@ Recognized keys:
 
 Seconds-based runtime intervals are limited to 12 hours to keep millisecond
 conversions safe. `aggPeriodS` values of zero are raised to one second.
+Sampling returns to `aware` if no `keepSampling` acknowledgement arrives within
+`maxUnackedPackets` aggregation periods, even if sensor failures prevent data
+aggregates from being produced.
 
 Example:
 
@@ -345,29 +360,26 @@ Button behavior:
 
 Select items:
 
-1. `Keyboard layout` -> `keyboardLayout` options: `PCB_Buttons`, `Membran_Buttons`
-   - Default: `Membran_Buttons`
-   - `Membran_Buttons` reverses Left/Right and Up/Down relative to `PCB_Buttons`
-2. `Sensor address` -> `sensorAddress` options: `1..9`
-3. `Sensor baudrate` -> `sensorBaudrate` options:
+1. `Sensor address` -> `sensorAddress` options: `1..9`
+2. `Sensor baudrate` -> `sensorBaudrate` options:
    - `1200, 4800, 9600, 19200, 38400, 57600, 115200`
-4. `Sensor warmup (ms)` -> `sensorWarmupMs` options:
+3. `Sensor warmup (ms)` -> `sensorWarmupMs` options:
    - `500, 1000, 2000, 4000, 5000, 10000`
-5. `Sensor type` -> `sensorType` options:
+4. `Sensor type` -> `sensorType` options:
    - `0, 1, 2`
-6. `Sampling interval` -> `samplingInterval` options:
+5. `Sampling interval` -> `samplingInterval` options:
    - `250, 500, 750, 1000, 2000, 5000, 10000`
-7. `Agg period (s)` -> `aggPeriodS` options:
+6. `Agg period (s)` -> `aggPeriodS` options:
    - `10, 15, 20, 30, 60, 120, 300, 600`
-9. `Aware timeout (s)` -> `awareTimeoutS` options:
+7. `Aware timeout (s)` -> `awareTimeoutS` options:
    - `60, 300, 600, 900, 1800, 3600`
-10. `Default sleep (s)` -> `defaultSleepS` options:
+8. `Default sleep (s)` -> `defaultSleepS` options:
    - `600, 900, 1800, 3600`
-11. `Status interval (s)` -> `statusIntervalS` options:
+9. `Status interval (s)` -> `statusIntervalS` options:
    - `60, 120, 300, 600, 900, 1800`
-12. `Max charge current` -> `maxChargingCurrent` options:
+10. `Max charge current` -> `maxChargingCurrent` options:
     - `250, 500, 750, 1000`
-13. `Max charge volt` -> `maxChargingVoltage` options:
+11. `Max charge volt` -> `maxChargingVoltage` options:
     - `3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2`
 
 Text editor items:

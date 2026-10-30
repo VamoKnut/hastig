@@ -8,14 +8,16 @@
 #include "Logger.h"
 #include "SettingsManager.h"
 
-// Portenta LEDs are active-low.
 static const char* TAG = "BOARD";
 
 namespace
 {
 static constexpr uint8_t KTD_LED_CONNECTION   = 1;
+static constexpr uint8_t KTD_LED_CELLULAR    = 2;
 static constexpr uint8_t KTD_LED_SENSOR_POWER = 3;
+static constexpr uint8_t KTD_LED_CHARGING    = 4;
 static constexpr uint8_t KTD_LED_MAX          = RgbLedStrip::MAX_CURRENT;
+static constexpr uint32_t CELLULAR_ACTIVITY_MS = 200u;
 static rtos::Mutex       ledDriverMutex;
 static bool              ledDriverReady           = false;
 static bool              connectionLedStateValid  = false;
@@ -23,10 +25,11 @@ static bool              connectionLedErrorLogged = false;
 static bool              sensorLedStateValid      = false;
 static bool              sensorLedPowerOn         = false;
 static uint8_t           connectionLedRgb[3]      = {0, 0, 0};
-
-static mbed::DigitalOut ledRed(PIN_LED_RED, 1);
-static mbed::DigitalOut ledGreen(PIN_LED_GREEN, 1);
-static mbed::DigitalOut ledBlue(PIN_LED_BLUE, 1);
+static bool              cellularActivityActive   = false;
+static uint32_t          cellularActivityUntilMs  = 0;
+static uint8_t           cellularLedRgb[3]        = {0, 0, 0};
+static bool              chargingLedStateValid    = false;
+static bool              chargingLedOn            = false;
 static mbed::DigitalOut sensorPowerEnable(PIN_POWER_ENABLE, 0);
 static mbed::DigitalOut rs485DriverEnable(PIN_RS485_DE_RE, 0);
 
@@ -34,21 +37,6 @@ static mbed::InterruptIn buttonLeft(PIN_BTN_LEFT, PullUp);
 static mbed::InterruptIn buttonRight(PIN_BTN_RIGHT, PullUp);
 static mbed::InterruptIn buttonUp(PIN_BTN_UP, PullUp);
 static mbed::InterruptIn buttonDown(PIN_BTN_DOWN, PullUp);
-
-static mbed::DigitalOut& ledOutput(BoardHal::LedColor color)
-{
-   switch (color)
-   {
-   case BoardHal::LedColor::Red:
-      return ledRed;
-   case BoardHal::LedColor::Green:
-      return ledGreen;
-   case BoardHal::LedColor::Blue:
-      return ledBlue;
-   default:
-      return ledRed;
-   }
-}
 
 // IRQ-based button detection (ring-buffer mailbox).
 static rtos::EventFlags        g_btnFlags;
@@ -177,11 +165,6 @@ static const uint16_t kEndOfChargeCurrentMa  = 5;
 
 void BoardHal::configurePins()
 {
-   // LEDs
-   ledRed.write(1);
-   ledGreen.write(1);
-   ledBlue.write(1);
-
    // Buttons (active-low)
    buttonLeft.mode(PullUp);
    buttonRight.mode(PullUp);
@@ -207,12 +190,6 @@ void BoardHal::configurePins()
       ledDriverReady = false;
       LOGE(TAG, "RGB LED strip allOff failed");
    }
-}
-
-void BoardHal::setLed(LedColor color, bool on)
-{
-   // active-low
-   ledOutput(color).write(on ? 0 : 1);
 }
 
 void BoardHal::setConnectionIndicator(ConnectionIndicator state, bool blinkOn)
@@ -263,36 +240,73 @@ void BoardHal::setConnectionIndicator(ConnectionIndicator state, bool blinkOn)
    connectionLedStateValid  = true;
 }
 
-void BoardHal::blinkLed(LedColor color, uint32_t ms, uint8_t times, uint32_t gapMs)
+void BoardHal::setCellularActivity(bool inbound)
 {
-   for (uint8_t i = 0; i < times; ++i)
+   const uint8_t red   = 0;
+   const uint8_t green = inbound ? 0 : KTD_LED_MAX;
+   const uint8_t blue  = inbound ? KTD_LED_MAX : 0;
+
+   mbed::ScopedLock<rtos::Mutex> lock(ledDriverMutex);
+   if (!ledDriverReady)
    {
-      setLed(color, true);
-      delay(ms);
-      setLed(color, false);
-      if (i + 1 < times)
-      {
-         delay(gapMs);
-      }
+      return;
    }
+   if (cellularLedRgb[0] != red || cellularLedRgb[1] != green || cellularLedRgb[2] != blue)
+   {
+      if (!hastig_led_strip().setRGB(KTD_LED_CELLULAR, red, green, blue))
+      {
+         LOGE(TAG, "Failed to update RGB LED cellular activity indicator");
+         return;
+      }
+      cellularLedRgb[0] = red;
+      cellularLedRgb[1] = green;
+      cellularLedRgb[2] = blue;
+   }
+   cellularActivityUntilMs = millis() + CELLULAR_ACTIVITY_MS;
+   cellularActivityActive  = true;
 }
 
-void BoardHal::blinkDualLedFeedback(uint32_t durationMs, uint32_t intervalMs)
+void BoardHal::updateCellularActivity()
 {
-   const uint32_t start = millis();
-   while ((uint32_t)(millis() - start) < durationMs)
+   mbed::ScopedLock<rtos::Mutex> lock(ledDriverMutex);
+   if (!cellularActivityActive ||
+       (int32_t)(millis() - cellularActivityUntilMs) < 0 ||
+       !ledDriverReady)
    {
-      setLed(LedColor::Red, true);
-      setLed(LedColor::Green, false);
-      delay(intervalMs);
-
-      setLed(LedColor::Red, false);
-      setLed(LedColor::Green, true);
-      delay(intervalMs);
+      return;
    }
 
-   setLed(LedColor::Red, false);
-   setLed(LedColor::Green, false);
+   if (!hastig_led_strip().setRGB(KTD_LED_CELLULAR, 0, 0, 0))
+   {
+      LOGE(TAG, "Failed to clear RGB LED cellular activity indicator");
+      return;
+   }
+   cellularLedRgb[0]      = 0;
+   cellularLedRgb[1]      = 0;
+   cellularLedRgb[2]      = 0;
+   cellularActivityActive = false;
+}
+
+void BoardHal::setChargingIndicator(bool charging, bool blinkOn)
+{
+   const bool ledOn = charging && blinkOn;
+   if (chargingLedStateValid && chargingLedOn == ledOn)
+   {
+      return;
+   }
+
+   mbed::ScopedLock<rtos::Mutex> lock(ledDriverMutex);
+   if (!ledDriverReady)
+   {
+      return;
+   }
+   if (!hastig_led_strip().setRGB(KTD_LED_CHARGING, 0, ledOn ? KTD_LED_MAX : 0, 0))
+   {
+      LOGE(TAG, "Failed to update RGB LED charging indicator");
+      return;
+   }
+   chargingLedOn         = ledOn;
+   chargingLedStateValid = true;
 }
 
 void BoardHal::setSensorPower(bool powerOn)
@@ -384,25 +398,19 @@ bool BoardHal::detectFactoryResetButtonCombo(uint32_t windowMs, uint32_t holdMs)
             comboStart = millis();
          }
 
-         // Visual cue while holding combo: RED on.
-         setLed(LedColor::Red, true);
-
          if ((uint32_t)(millis() - comboStart) >= holdMs)
          {
-            setLed(LedColor::Red, false);
             return true;
          }
       }
       else
       {
          comboStart = 0;
-         setLed(LedColor::Red, false);
       }
 
       delay(50);
    }
 
-   setLed(LedColor::Red, false);
    return false;
 }
 

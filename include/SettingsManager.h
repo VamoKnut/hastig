@@ -53,8 +53,6 @@ struct AppSettings {
   uint32_t max_forced_sleep_s  = 43200;
   uint32_t max_unacked_packets = 10;
 
-  // Physical button arrangement: "PCB_Buttons" or "Membran_Buttons".
-  char keyboard_layout[20] = "Membran_Buttons";
 };
 
 /**

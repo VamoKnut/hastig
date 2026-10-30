@@ -65,6 +65,7 @@ private:
   rtos::EventFlags _completion;
   std::atomic<bool> _stopRequested{false};
   static constexpr uint32_t FLAG_STOPPED = 1u << 0;
+  static constexpr uint32_t MAX_ACK_TIMEOUT_MS = 0x7FFFFFFFu;
 
   State    _state          = State::Aware;
   uint32_t _stateEnterMs   = 0;
@@ -78,6 +79,8 @@ private:
 
   uint32_t _lastActivityMs = 0;
   uint32_t _lastStatusMs   = 0;
+  uint32_t _lastChargeCheckMs = 0;
+  bool     _charging = false;
 
   uint32_t _forcedHibernateS          = 0;
   HibernateReason _hibernateReason    = HibernateReason::Inactivity;

@@ -74,6 +74,7 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <li><code>aware</code></li>
 <li>Network connected, waiting for commands</li>
 <li>Periodic status reporting</li>
+<li>Fuel-gauge current is checked every five seconds; RGB LED 4 flashes green at 0.5 Hz when charging current is above +5 mA</li>
 <li><code>sampling</code></li>
 <li>Sampling + aggregation enabled</li>
 <li>Sends aggregate packets</li>
@@ -82,7 +83,15 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <li>Publish hibernation status/mode change</li>
 <li><code>PowerManager</code> performs sleep sequence</li>
 </ul>
-<h3 id="15-mqtt-topic-model">1.5 MQTT topic model</h3>
+<h3 id="15-rgb-led-strip-indicators">1.5 RGB LED strip indicators</h3>
+<ul>
+<li>LED 1 indicates cellular connection state.</li>
+<li>LED 2 flashes green for outgoing MQTT publishes and blue for received MQTT messages; each flash lasts 200 ms.</li>
+<li>LED 3 indicates sensor power.</li>
+<li>LED 4 flashes green at 0.5 Hz in <code>aware</code> mode when fuel-gauge current is above +5 mA (charging).</li>
+</ul>
+<p>The M7 PlatformIO environment takes its displayed firmware revision from <code>build.counter</code>. Each M7 PlatformIO build uses the current counter and advances it for the next build. The generated revision header is included only by <code>main.cpp</code>, so counter changes do not force a full firmware rebuild.</p>
+<h3 id="16-mqtt-topic-model">1.6 MQTT topic model</h3>
 <p>Topic format:</p>
 <p><code>&lt;prefix&gt;/&lt;nodeId&gt;/&lt;postfix&gt;</code></p>
 <p>Defaults from <code>include/AppConfig.h</code>:</p>

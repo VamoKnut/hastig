@@ -2,11 +2,9 @@
 
 #include "AppConfig.h"
 #include "Logger.h"
+#include "ModbusRtuMaster.h"
 
 #include <Arduino.h>
-#include <ArduinoModbus.h>
-#include <ArduinoRS485.h>
-#include <pinDefinitions.h>
 #include <math.h>
 #include <string.h>
 #include <stdint.h>
@@ -49,6 +47,11 @@ class FakeSensor : public Sensor
 class SeametricsCT2X : public Sensor
 {
  public:
+   SeametricsCT2X()
+       : _modbus(PIN_RS485_TX, PIN_RS485_DE_RE, PIN_RS485_DE_RE)
+   {
+   }
+
    const char* name() const override
    {
       return "seametricsCT2X";
@@ -72,36 +75,32 @@ class SeametricsCT2X : public Sensor
          return false;
       }
 
-      // ArduinoRS485::setPins accepts Arduino pin indices, not mbed PinName values.
-      RS485.setPins(PinNameToIndex(PIN_RS485_TX),
-                    PinNameToIndex(PIN_RS485_DE_RE),
-                    PinNameToIndex(PIN_RS485_DE_RE));
-      const int frameDelayUs = calcFrameDelayUs(s.sensor_baud);
-      RS485.setDelays(frameDelayUs, frameDelayUs);
-
-      if (!ModbusRTUClient.begin(s.sensor_baud, SERIAL_8N1))
+      if (!_modbus.begin(s.sensor_baud, kTimeoutMs))
       {
          LOGE(TAG, "ModbusRTUClient begin failed");
          return false;
       }
 
-      ModbusRTUClient.setTimeout(kTimeoutMs);
       _slaveId = s.sensor_addr;
       LOGI(TAG,
-           "Seametrics modbus uart tx=PA_9 rx=PA_10 de/re=PA_8 baud=%lu addr=%u timeout=%lu",
+           "Seametrics Modbus FC03 tx=PA_9 rx=PA_10 de/re=PA_8 baud=%lu addr=%u start=0x%04X count=%u timeout=%lu",
            (unsigned long)s.sensor_baud,
            (unsigned int)_slaveId,
+           (unsigned int)kTelemetryStartReg,
+           (unsigned int)kTelemetryRegCount,
            (unsigned long)kTimeoutMs);
       _discardNextSample = true;
+      _readErrorLogged = false;
       _started = true;
       return true;
    }
 
    void end() override
    {
-      ModbusRTUClient.end();
+      _modbus.end();
       _started = false;
       _discardNextSample = true;
+      _readErrorLogged = false;
    }
 
    bool sample(SensorSampleMsg& out) override
@@ -112,26 +111,24 @@ class SeametricsCT2X : public Sensor
       }
 
       uint16_t regs[kTelemetryRegCount] = {};
-      const int requested =
-          ModbusRTUClient.requestFrom((int)_slaveId, HOLDING_REGISTERS, kTelemetryStartReg, kTelemetryRegCount);
-      if (requested != kTelemetryRegCount)
+      if (!_modbus.readHoldingRegisters(_slaveId,
+                                        static_cast<uint16_t>(kTelemetryStartReg),
+                                        kTelemetryRegCount,
+                                        regs))
       {
+         if (!_readErrorLogged)
+         {
+            const char* error = _modbus.lastError();
+            LOGW(TAG, "Modbus FC03 failed addr=%u start=0x%04X count=%u: %s",
+                 (unsigned int)_slaveId,
+                 (unsigned int)kTelemetryStartReg,
+                 (unsigned int)kTelemetryRegCount,
+                 error != nullptr ? error : "unspecified Modbus error");
+            _readErrorLogged = true;
+         }
          return false;
       }
-
-      for (int i = 0; i < kTelemetryRegCount; i++)
-      {
-         if (ModbusRTUClient.available() <= 0)
-         {
-            return false;
-         }
-         const long v = ModbusRTUClient.read();
-         if (v < 0 || v > 0xFFFF)
-         {
-            return false;
-         }
-         regs[i] = (uint16_t)v;
-      }
+      _readErrorLogged = false;
 
       // First read after begin() is known invalid on this sensor.
       if (_discardNextSample)
@@ -160,15 +157,6 @@ class SeametricsCT2X : public Sensor
    static constexpr int           kTelemetryRegCount = 4;
    static constexpr unsigned long kTimeoutMs         = 150;
 
-   static int calcFrameDelayUs(unsigned long baud)
-   {
-      if (baud == 0)
-      {
-         return 0;
-      }
-      return (int)((35UL * 1000000UL + (baud - 1UL)) / baud);
-   }
-
    static float doubleWordToFloat(uint16_t highWord, uint16_t lowWord)
    {
       const uint32_t bits = ((uint32_t)highWord << 16) | (uint32_t)lowWord;
@@ -177,9 +165,11 @@ class SeametricsCT2X : public Sensor
       return out;
    }
 
+   ModbusRtuMaster _modbus;
    uint8_t _slaveId = 1;
    bool    _started = false;
    bool    _discardNextSample = true;
+   bool    _readErrorLogged = false;
 };
 
 class PT12Sensor : public Sensor

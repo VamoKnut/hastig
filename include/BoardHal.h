@@ -16,7 +16,6 @@ class SettingsManager;
  */
 class BoardHal {
 public:
-  enum class LedColor : uint8_t { Red, Green, Blue };
   enum class Button : uint8_t { Left, Right, Up, Down };
   enum class ConnectionIndicator : uint8_t { Off, Connecting, Connected, Retrying };
 
@@ -41,11 +40,11 @@ public:
   /** Configure all GPIO directions and default states early in setup(). */
   static void configurePins();
 
-  /** LED helpers. Portenta LEDs are active-low; callers use colors only. */
-  static void setLed(LedColor color, bool on);
+  /** RGB strip indicators. */
   static void setConnectionIndicator(ConnectionIndicator state, bool blinkOn = true);
-  static void blinkLed(LedColor color, uint32_t ms, uint8_t times = 1, uint32_t gapMs = 60);
-  static void blinkDualLedFeedback(uint32_t durationMs = 5000u, uint32_t intervalMs = 250u);
+  static void setCellularActivity(bool inbound);
+  static void updateCellularActivity();
+  static void setChargingIndicator(bool charging, bool blinkOn);
 
   /** External sensor/RS485 rail control. */
   static void setSensorPower(bool powerOn = true);

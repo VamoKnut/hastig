@@ -14,28 +14,6 @@ using namespace std::chrono;
 
 static const char* TAG = "UI";
 
-namespace {
-BoardHal::Button toApplicationButton(BoardHal::Button physicalButton, const AppSettings& settings)
-{
-  if (strcmp(settings.keyboard_layout, "Membran_Buttons") == 0) {
-    return physicalButton;
-  }
-
-  switch (physicalButton) {
-    case BoardHal::Button::Left:
-      return BoardHal::Button::Right;
-    case BoardHal::Button::Right:
-      return BoardHal::Button::Left;
-    case BoardHal::Button::Up:
-      return BoardHal::Button::Down;
-    case BoardHal::Button::Down:
-      return BoardHal::Button::Up;
-    default:
-      return physicalButton;
-  }
-}
-} // namespace
-
 /**
  * @brief Construct UI thread.
  */
@@ -86,7 +64,7 @@ void UiThread::onItemSelectedEvent(const JsonVariantConst itemRetVal)
     e.value[sizeof(e.value) - 1] = '\0';
   }
 
-  _eventBus.publishUi(e);
+  _eventBus.publish(e);
 }
 
 /**
@@ -123,7 +101,7 @@ void UiThread::post_key(BoardHal::Button b)
   e.topic[sizeof(e.topic) - 1] = '\0';
   e.value[sizeof(e.value) - 1] = '\0';
 
-  _eventBus.publishUi(e);
+  _eventBus.publish(e);
 }
 
 /**
@@ -153,8 +131,7 @@ void UiThread::run()
 
     BoardHal::Button b;
     while (BoardHal::popButton(b)) {
-      const AppSettings settings = _settings.getCopy();
-      const BoardHal::Button appButton = toApplicationButton(b, settings);
+      const BoardHal::Button appButton = b;
       post_key(appButton);
 
       if (_statusMode) {

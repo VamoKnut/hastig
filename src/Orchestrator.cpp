@@ -185,6 +185,9 @@ void Orchestrator::enterState(State s)
 
   if (s == State::Aware) {
     LOGI(TAG, "State=aware");
+    _lastChargeCheckMs = 0;
+    _charging = false;
+    BoardHal::setChargingIndicator(false, false);
 
     // Ensure sampling pipeline is stopped.
     _sensor.setEnabled(false);
@@ -474,27 +477,44 @@ void Orchestrator::checkTimeouts()
   const uint32_t    now  = timeutil::nowMs();
   _runtimeStatus.setAwareWindow(_lastActivityMs, s.aware_timeout_s);
 
+  const bool statusDue = (_state == State::Aware || _state == State::Sampling) &&
+      (_lastStatusMs == 0 || (now - _lastStatusMs) > (s.status_interval_s * 1000u));
+  const bool chargeCheckDue = _state == State::Aware &&
+      (_lastChargeCheckMs == 0 || (now - _lastChargeCheckMs) >= 5000u);
+  BoardHal::BatterySnapshot battery;
+  if (statusDue || chargeCheckDue) {
+    battery = BoardHal::readBattery(hastig_battery());
+  }
+
+  if (chargeCheckDue) {
+    _charging = battery.current > 5.0f;
+    _lastChargeCheckMs = now;
+  }
+
+  if (_state == State::Aware) {
+    BoardHal::setChargingIndicator(_charging, ((now / 1000u) & 1u) == 0u);
+  } else {
+    _charging = false;
+    BoardHal::setChargingIndicator(false, false);
+  }
+
   // Periodic battery/status reporting (aware + sampling).
-  if (_state == State::Aware || _state == State::Sampling) {
-    if (_lastStatusMs == 0 || (now - _lastStatusMs) > (s.status_interval_s * 1000u)) {
-      const BoardHal::BatterySnapshot bs = BoardHal::readBattery(hastig_battery());
+  if (statusDue) {
+    const char* modeStr = (_state == State::Sampling) ? "sampling" : "aware";
+    _commsEgress.publishStatus(battery, modeStr);
 
-      const char* modeStr = (_state == State::Sampling) ? "sampling" : "aware";
-      _commsEgress.publishStatus(bs, modeStr);
+    _lastStatusMs = now;
 
-      _lastStatusMs = now;
+    // Low battery detection.
+    if (battery.minimumVoltage < s.low_batt_min_v) {
+      if (!_emergencyArmed) {
+        _emergencyArmed = true;
+        _emergencyAtMs  = now + (s.emergency_delay_s * 1000u);
 
-      // Low battery detection.
-      if (bs.minimumVoltage < s.low_batt_min_v) {
-        if (!_emergencyArmed) {
-          _emergencyArmed = true;
-          _emergencyAtMs  = now + (s.emergency_delay_s * 1000u);
-
-          _commsEgress.publishLowBatteryAlert(bs, modeStr);
-        }
-      } else {
-        _emergencyArmed = false;
+        _commsEgress.publishLowBatteryAlert(battery, modeStr);
       }
+    } else {
+      _emergencyArmed = false;
     }
   }
 
@@ -525,11 +545,19 @@ void Orchestrator::checkTimeouts()
     if (limit == 0u) {
       limit = 1u;
     }
-    if (_unackedAggregateCount >= limit) {
+    uint64_t ackTimeoutMs =
+        static_cast<uint64_t>(s.agg_period_s) * 1000ULL * limit;
+    if (ackTimeoutMs > MAX_ACK_TIMEOUT_MS) {
+      ackTimeoutMs = MAX_ACK_TIMEOUT_MS;
+    }
+
+    if (_unackedAggregateCount >= limit ||
+        (uint32_t)(now - _lastAckMs) >= static_cast<uint32_t>(ackTimeoutMs)) {
       LOGW(TAG,
-           "Unacked limit reached (%lu/%lu) -> back to aware",
+           "Sampling ack timeout (unacked=%lu/%lu elapsed=%lu ms) -> back to aware",
            (unsigned long)_unackedAggregateCount,
-           (unsigned long)limit);
+           (unsigned long)limit,
+           (unsigned long)(uint32_t)(now - _lastAckMs));
       enterState(State::Aware);
     }
   }
@@ -565,25 +593,12 @@ void Orchestrator::run()
       enterState(State::Hibernating);
     }
 
-    // Unified event stream (UI + Comms)
+    // Unified FIFO event stream from UI, communications, and workers.
     DeviceEvent evt;
     if (_eventBus.tryGetNext(evt, 20)) {
       if (evt.type == DeviceEvent::Type::Ui) {
         _lastActivityMs = nowMs;
         handleUiEvent(evt.data.ui);
-      } else if (evt.type == DeviceEvent::Type::Worker) {
-        const WorkerEventMsg& w = evt.data.worker;
-        _lastActivityMs = nowMs;
-        switch (w.type) {
-          case WorkerEventType::SampleTaken:
-            // Sampling tick observed (lightweight observability only)
-            break;
-          case WorkerEventType::AggregateReady:
-            // Aggregate produced (n=%lu, ok=%d)
-            break;
-          default:
-            break;
-        }
       } else {
         // Comms events
         const CommsEventMsg& commEvt = evt.data.comms;
@@ -616,7 +631,6 @@ void Orchestrator::run()
             break;
 
           case CommsEventType::AggregatePublishAttempted:
-            _lastActivityMs = nowMs;
             if (_state == State::Sampling) {
               _unackedAggregateCount++;
             }

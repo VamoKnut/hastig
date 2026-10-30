@@ -6,6 +6,7 @@
 #include <Arduino_PowerManagement.h>
 
 #include "AppConfig.h"
+#include "HastigBuildRevision.h"
 #include "Logger.h"
 #include "Messages.h"
 #include "ConsoleCommands.h"
@@ -92,7 +93,6 @@ void setup()
   if (BoardHal::detectFactoryResetButtonCombo()) {
     LOGW(TAG, "Factory reset key combo held for 3s");
     sysCtx.settings.factoryReset();
-    BoardHal::blinkDualLedFeedback();
   }
 
   sysCtx.settings.begin();

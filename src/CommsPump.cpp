@@ -501,6 +501,8 @@ void CommsPump::mqttCallbackTrampoline(char* topic, uint8_t* payload, unsigned i
  */
 void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
 {
+  BoardHal::setCellularActivity(true);
+
   // Copy payload to a null-terminated buffer on stack.
   char buf[256];
   const size_t n = (len < sizeof(buf) - 1u) ? (size_t)len : (sizeof(buf) - 1u);
@@ -533,6 +535,7 @@ void CommsPump::onMqttMessage(char* topic, uint8_t* payload, unsigned int len)
  */
 void CommsPump::loopOnce()
 {
+  BoardHal::updateCellularActivity();
   updateConnectionIndicator();
   if (!_hibernatePending && _wantConnected &&
       (timeutil::nowMs() - _bootMs) < HASTIG_COMMS_READY_GRACE_MS) {
@@ -577,6 +580,7 @@ void CommsPump::loopOnce()
     }
   }
   updateConnectionIndicator();
+  BoardHal::updateCellularActivity();
 
   // Drain aggregates and publish
   uint8_t publishedThisLoop = 0;
@@ -647,7 +651,9 @@ bool CommsPump::publishJson(const char* topic, const JsonDocument& doc)
   // Use the C-string publish overload so the payload length is derived from strlen().
   // This keeps the MQTT payload clean when receivers assume null-termination.
   const bool ok = mqtt.publish(topic, buf);
-  if (!ok) {
+  if (ok) {
+    BoardHal::setCellularActivity(false);
+  } else {
     postEvent(CommsEventType::PublishFailed, topic, "publish failed");
     if (!mqtt.connected()) {
       postEvent(CommsEventType::MqttDown, "mqtt", "publish_disconnected");

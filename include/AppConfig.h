@@ -7,8 +7,6 @@
 /**
  * @brief Hastig compile-time configuration.
  */
-static constexpr const char* HASTIG_AI_REVISION = "v158";
-
 // ---------------- Pins ----------------
 static constexpr PinName PIN_BTN_LEFT = PC_13;
 static constexpr PinName PIN_BTN_UP = PC_15;
@@ -48,9 +46,6 @@ static constexpr PinName PIN_MOTORB_Disabled = PA_1C;
 
 static constexpr PinName PIN_DISPLAY_SDA = PH_8;
 static constexpr PinName PIN_DISPLAY_SCL = PH_7;
-static constexpr PinName PIN_LED_RED = PK_5;
-static constexpr PinName PIN_LED_GREEN = PK_6;
-static constexpr PinName PIN_LED_BLUE = PK_7;
 static constexpr PinName PIN_SESSION_ENTROPY_A = PA_0C;
 static constexpr PinName PIN_SESSION_ENTROPY_B = PA_1C;
 
@@ -72,9 +67,7 @@ static constexpr uint32_t STACK_UI    = 6 * 1024;
 static constexpr uint32_t QUEUE_DEPTH_SENSOR_TO_AGG = 32;
 static constexpr uint32_t QUEUE_DEPTH_AGG_TO_COMMS  = 16;
 
-static constexpr uint32_t QUEUE_DEPTH_UI_TO_ORCH      = 16;
-static constexpr uint32_t QUEUE_DEPTH_COMMS_TO_ORCH   = 16;
-static constexpr uint32_t QUEUE_DEPTH_WORKER_TO_ORCH  = 8;
+static constexpr uint32_t QUEUE_DEPTH_ORCH_EVENTS = 40;
 static constexpr uint32_t QUEUE_DEPTH_ORCH_TO_COMMS   = 16;
 
 // ---------------- MQTT topics ----------------
