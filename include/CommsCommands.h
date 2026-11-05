@@ -12,6 +12,7 @@
 enum class OrchCommandType : uint8_t {
   PublishAwake,
   PublishHibernating,
+  PublishGaugingRequest,
   ApplySettingsJson,
   PublishConfig,
 };

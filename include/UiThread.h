@@ -38,6 +38,8 @@ private:
   LcdMenu   _menu;
   uint32_t  _lastSettingsRevision = 0;
   bool      _statusMode = true;
+  bool      _deviceInfoMode = false;
+  uint32_t  _lastDeviceInfoRenderMs = 0;
 
   rtos::Thread _thread;
   rtos::EventFlags _completion;

@@ -12,6 +12,8 @@
 #include <GSM.h>
 #include <PubSubClient.h>
 #include <platform/ScopedLock.h>
+#include <AT_CellularDevice.h>
+#include <CellularInformation.h>
 
 #include <chrono>
 using namespace std::chrono;
@@ -32,10 +34,12 @@ static PubSubClient mqtt(gsmClient);
  */
 CommsPump::CommsPump(CommsInbox& inbox,
                      EventBus& eventBus,
-                     SettingsManager& settings)
+                     SettingsManager& settings,
+                     RuntimeStatus& runtimeStatus)
     : _inbox(inbox),
       _eventBus(eventBus),
-      _settings(settings)
+      _settings(settings),
+      _runtimeStatus(runtimeStatus)
 {
   _self = this;
 }
@@ -45,6 +49,8 @@ CommsPump::CommsPump(CommsInbox& inbox,
  */
 void CommsPump::begin()
 {
+  BoardHal::getHardwareId(_hardwareId, sizeof(_hardwareId));
+  _runtimeStatus.setHardwareId(_hardwareId);
   _bootMs = timeutil::nowMs();
   _connectionRetrying = false;
   updateConnectionIndicator();
@@ -56,6 +62,7 @@ void CommsPump::begin()
 
 void CommsPump::updateConnectionIndicator()
 {
+  _runtimeStatus.setCommunicationReady(_mqttConnected && mqtt.connected());
   if (_mqttConnected && mqtt.connected()) {
     _connectionRetrying = false;
     BoardHal::setConnectionIndicator(BoardHal::ConnectionIndicator::Connected);
@@ -126,6 +133,17 @@ void CommsPump::handleOrchCommand(const OrchCommandMsg& cmd)
     case OrchCommandType::PublishHibernating:
       (void)publishStatus("hibernating", cmd.payload[0] ? cmd.payload : nullptr);
       break;
+    case OrchCommandType::PublishGaugingRequest: {
+      if (!ensureMqtt()) {
+        break;
+      }
+      JsonDocument request;
+      request["type"] = "gauging request";
+      if (!publishJson(_topicStatus, request)) {
+        LOGW(TAG, "Gauging request publish failed");
+      }
+      break;
+    }
     case OrchCommandType::PublishConfig:
       (void)publishConfigSnapshot();
       break;
@@ -170,6 +188,8 @@ void CommsPump::teardownLinks(bool endGsm)
     GSM.end();
     LOGI(TAG, "teardownLinks: GSM.end() returned");
     _netConnected = false;
+    _iccidAvailable = false;
+    _runtimeStatus.setNetworkInfo(nullptr, nullptr);
   }
   LOGI(TAG, "teardownLinks end");
 }
@@ -207,14 +227,8 @@ bool CommsPump::ensureNetwork()
     _netFailCount = 0;
     _lastNetOkMs  = timeutil::nowMs();
     postEvent(CommsEventType::NetUp, "net", "up");
-
-    NetworkInterface* net = GSM.getNetwork();
-    SocketAddress ipAddress;
-    if (net != nullptr && net->get_ip_address(&ipAddress) == NSAPI_ERROR_OK && ipAddress.get_ip_address() != nullptr) {
-      LOGI(TAG, "GSM.begin OK, IP=%s", ipAddress.get_ip_address());
-    } else {
-      LOGI(TAG, "GSM.begin OK");
-    }
+    _iccidAvailable = updateDeviceInfo();
+    _nextDeviceInfoRetryMs = timeutil::nowMs() + 30000u;
     return true;
   }
 
@@ -235,6 +249,71 @@ bool CommsPump::ensureNetwork()
 
   waitWithRetryIndicator((_netFailCount < 5) ? 1500u : 5000u);
   return false;
+}
+
+bool CommsPump::updateDeviceInfo()
+{
+  char ip[48] = {0};
+  char iccid[24] = {0};
+  bool iccidAvailable = false;
+  {
+    mbed::ScopedLock<rtos::Mutex> lock(gsmMx);
+    NetworkInterface* network = GSM.getNetwork();
+    SocketAddress address;
+    if (network != nullptr &&
+        network->get_ip_address(&address) == NSAPI_ERROR_OK &&
+        address.get_ip_address() != nullptr) {
+      strncpy(ip, address.get_ip_address(), sizeof(ip) - 1u);
+    }
+
+    mbed::CellularDevice* device = mbed::CellularDevice::get_default_instance();
+    if (device != nullptr) {
+      mbed::CellularInformation* information = device->open_information();
+      if (information != nullptr) {
+        if (!_modemModelLogged) {
+          char model[32] = {0};
+          const nsapi_error_t modelResult = information->get_model(model, sizeof(model));
+          if (modelResult == NSAPI_ERROR_OK && model[0] != '\0') {
+            LOGI(TAG, "Cellular modem model reported by modem: %s", model);
+            _tx62Modem = strncmp(model, "TX62", 4u) == 0;
+          } else {
+            LOGW(TAG, "Unable to read cellular modem model (error=%d)", (int)modelResult);
+          }
+          _modemModelLogged = true;
+        }
+
+        nsapi_error_t result = NSAPI_ERROR_DEVICE_ERROR;
+        if (_tx62Modem) {
+          mbed::AT_CellularDevice* atDevice = static_cast<mbed::AT_CellularDevice*>(device);
+          mbed::ATHandler* atHandler = atDevice->get_at_handler();
+          if (atHandler != nullptr) {
+            result = atHandler->at_cmd_str("^SCID", "", iccid, sizeof(iccid));
+          }
+        } else {
+          result = information->get_iccid(iccid, sizeof(iccid));
+        }
+
+        if (result != NSAPI_ERROR_OK) {
+          LOGW(TAG, "Unable to read SIM ICCID (error=%d)", (int)result);
+        } else {
+          iccidAvailable = iccid[0] != '\0';
+          if (!iccidAvailable) {
+            LOGW(TAG, "SIM ICCID query returned an empty value");
+          }
+        }
+        device->close_information();
+      } else {
+        LOGW(TAG, "Unable to open cellular information interface");
+      }
+    } else {
+      LOGW(TAG, "Cellular device unavailable for ICCID query");
+    }
+  }
+
+  const RuntimeStatus::DeviceInfo currentInfo = _runtimeStatus.getDeviceInfo();
+  const char* cachedIccid = iccidAvailable ? iccid : currentInfo.iccid;
+  _runtimeStatus.setNetworkInfo(ip, cachedIccid);
+  return iccidAvailable;
 }
 
 /**
@@ -261,10 +340,8 @@ bool CommsPump::ensureMqtt()
   if (_topicCmd[0] == '\0') {
     // Use friendly name for topic segment, fallback to a stable hardware ID.
     const char* node = s.device_name;
-    char        hwId[32];
     if (node[0] == '\0') {
-      BoardHal::getHardwareId(hwId, sizeof(hwId));
-      node = hwId;
+      node = _hardwareId;
     }
 
     (void)protocol::buildTopic(_topicCmd, sizeof(_topicCmd), MQTT_TOPIC_PREFIX, node, MQTT_TOPIC_POSTFIX_CMD);
@@ -568,6 +645,12 @@ void CommsPump::loopOnce()
       _mqttConnected = false;
       updateConnectionIndicator();
       (void)ensureMqtt();
+    }
+
+    if (_netConnected && !_iccidAvailable &&
+        static_cast<int32_t>(timeutil::nowMs() - _nextDeviceInfoRetryMs) >= 0) {
+      _iccidAvailable = updateDeviceInfo();
+      _nextDeviceInfoRetryMs = timeutil::nowMs() + 30000u;
     }
 
     // PubSubClient::loop() returns bool in most versions; if it fails, drop the link and reconnect later.

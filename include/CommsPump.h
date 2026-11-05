@@ -10,6 +10,7 @@
 #include "Messages.h"
 #include "SettingsManager.h"
 #include "EventBus.h"
+#include "RuntimeStatus.h"
 
 template <uint32_t DEPTH>
 using AggMail = rtos::Mail<AggregateMsg, DEPTH>;
@@ -31,7 +32,8 @@ class CommsPump {
 public:
   CommsPump(CommsInbox& inbox,
             EventBus& eventBus,
-            SettingsManager& settings);
+            SettingsManager& settings,
+            RuntimeStatus& runtimeStatus);
 
   /**
    * @brief Initialize the pump (call from setup()).
@@ -64,6 +66,7 @@ private:
   CommsInbox&       _inbox;
   EventBus&         _eventBus;
   SettingsManager&  _settings;
+  RuntimeStatus&    _runtimeStatus;
 
   bool _wantConnected = true;
   bool _hibernatePending = false;
@@ -72,8 +75,12 @@ private:
   bool     _netConnected  = false;
   bool     _mqttConnected = false;
   bool     _subscriptionsReady = false;
+  bool     _iccidAvailable = false;
+  bool     _modemModelLogged = false;
+  bool     _tx62Modem = false;
   uint32_t _lastNetOkMs   = 0;
   uint32_t _lastMqttOkMs  = 0;
+  uint32_t _nextDeviceInfoRetryMs = 0;
 
   uint32_t _netFailCount  = 0;
   uint32_t _mqttFailCount = 0;
@@ -85,6 +92,7 @@ private:
   char _topicCfg[96]    = {0};
   char _topicData[96]   = {0};
   char _topicStatus[96] = {0};
+  char _hardwareId[32] = {0};
 
   void postEvent(CommsEventType type, const char* topic, const char* payload);
 
@@ -92,6 +100,7 @@ private:
 
   bool ensureNetwork();
   bool ensureMqtt();
+  bool updateDeviceInfo();
 
   void teardownLinks(bool endGsm);
   void updateConnectionIndicator();

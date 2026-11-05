@@ -23,6 +23,7 @@ public:
   // Higher-level helpers: keep callers decoupled from OrchCommandType.
   bool publishAwake();
   bool publishAwakeJson(const char* json);
+  bool publishGaugingRequest();
   bool publishModeChange(const char* mode, const char* previousMode, const char* reason = nullptr);
   bool publishStatus(const BoardHal::BatterySnapshot& bs, const char* mode);
   bool publishLowBatteryAlert(const BoardHal::BatterySnapshot& bs, const char* mode);

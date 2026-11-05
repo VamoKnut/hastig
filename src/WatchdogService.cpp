@@ -15,7 +15,6 @@ static constexpr uint32_t kPrescalerValue = 256UL;
 
 IWDG_HandleTypeDef g_iwdg{};
 bool g_running = false;
-bool g_blockKicksForTest = false;
 bool g_startedAttempted = false;
 bool g_assistThreadStarted = false;
 bool g_standbyFreeze = false;
@@ -132,7 +131,7 @@ void assistThreadEntry()
   while (true) {
     rtos::ThisThread::sleep_for(std::chrono::milliseconds(HASTIG_WATCHDOG_LONG_OP_KICK_MS));
 
-    if (!g_running || g_blockKicksForTest || g_longOperationDepth.load() == 0u) {
+    if (!g_running || g_longOperationDepth.load() == 0u) {
       continue;
     }
 
@@ -207,7 +206,7 @@ bool begin()
 
 void kick()
 {
-  if (g_running && !g_blockKicksForTest) {
+  if (g_running) {
     HAL_IWDG_Refresh(&g_iwdg);
   }
 }
@@ -250,26 +249,6 @@ void prepareForHibernate()
 bool isRunning()
 {
   return g_running;
-}
-
-void blockKicksForTest()
-{
-  if (!g_running) {
-    LOGW(TAG, "Block kick requested, but IWDG is not running (status=%u sw=%d stopFreeze=%d standbyFreeze=%d)",
-         (unsigned)g_startStatus,
-         g_softwareIwdg ? 1 : 0,
-         g_stopFreeze ? 1 : 0,
-         g_standbyFreeze ? 1 : 0);
-    return;
-  }
-
-  g_blockKicksForTest = true;
-  LOGW(TAG, "IWDG kicks blocked for reboot test");
-}
-
-bool kicksBlocked()
-{
-  return g_blockKicksForTest;
 }
 
 void logStatus()

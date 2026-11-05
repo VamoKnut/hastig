@@ -10,8 +10,6 @@ void beginLongOperation(uint32_t maxDurationMs);
 void endLongOperation();
 void prepareForHibernate();
 bool isRunning();
-void blockKicksForTest();
-bool kicksBlocked();
 void logStatus();
 
 class ScopedLongOperation {

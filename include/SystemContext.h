@@ -62,7 +62,7 @@ struct SystemContext {
         aggThread(mailboxes.sensorToAggMail, commsEgress, settings, sessionClock,
                   eventBus),
         commsInbox(mailboxes.aggToCommsMail, mailboxes.orchToCommsMail),
-        commsPump(commsInbox, eventBus, settings),
+        commsPump(commsInbox, eventBus, settings, runtimeStatus),
         powerManager(board, rrStore, commsPump, uiThread, aggThread, samplingThread,
                      wakePin),
         orchestrator(eventBus, commsEgress, settings, sessionClock, samplingThread, aggThread,

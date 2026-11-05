@@ -91,6 +91,10 @@ Defaults from `include/AppConfig.h`:
 - data postfix: `data`
 - status postfix: `status`
 
+### 1.7 Firmware version and revision
+
+The status-information page displays the software version and build revision at the top as `v. <major>.<minor> r<revision>`. Major/minor values are defined in `include/HastigBuildRevision.h`; the M7 PlatformIO build counter supplies the numeric revision. During cellular and MQTT setup, the main status screen shows `Connecting...`; it changes to `AWARE` once MQTT is connected.
+
 `nodeId` source:
 
 - `settings.device_name` if non-empty
@@ -286,6 +290,16 @@ Optional keys:
 
 - Masked config keys for that section
 
+#### F) `type = "gauging request"`
+
+The manually selected `Request gauging` menu action publishes this message to `/status`:
+
+```json
+{"type":"gauging request"}
+```
+
+No additional keys are included.
+
 Notes:
 
 - Secrets are masked as `"***"` when set (`simPin`, `apnUser`, `apnPass`, `mqttUser`, `mqttPass`).
@@ -350,11 +364,15 @@ Button behavior:
 
 ### 3.2 Top-level menu tree
 
-1. `Start sampling` (action -> `cmd:startSampling`)
-2. `Stop sampling` (action -> `cmd:stopSampling`)
-3. `Hibernate 10m` (action -> `cmd:hibernate`)
-4. `Setup` (submenu)
-5. `Send config` (action -> `cmd:getConfig`)
+1. `Request gauging` (publishes `{"type":"gauging request"}`)
+2. `Start sampling` (action -> `cmd:startSampling`)
+3. `Stop sampling` (action -> `cmd:stopSampling`)
+4. `Hibernate` (action -> `cmd:hibernate`; uses configured `defaultSleepS`)
+5. `Setup` (submenu)
+6. `Send config` (action -> `cmd:getConfig`)
+7. `Show status` (local display page)
+
+The status page shows battery voltage, current consumption, IP address, and SIM ICCID. Press Left or Right to return to the menu.
 
 ### 3.3 Setup submenu
 
@@ -363,6 +381,7 @@ Select items:
 1. `Sensor address` -> `sensorAddress` options: `1..9`
 2. `Sensor baudrate` -> `sensorBaudrate` options:
    - `1200, 4800, 9600, 19200, 38400, 57600, 115200`
+   - Default: `38400`
 3. `Sensor warmup (ms)` -> `sensorWarmupMs` options:
    - `500, 1000, 2000, 4000, 5000, 10000`
 4. `Sensor type` -> `sensorType` options:
@@ -372,15 +391,18 @@ Select items:
 6. `Agg period (s)` -> `aggPeriodS` options:
    - `10, 15, 20, 30, 60, 120, 300, 600`
 7. `Aware timeout (s)` -> `awareTimeoutS` options:
-   - `60, 300, 600, 900, 1800, 3600`
+   - `30, 60, 300, 600, 900, 1800, 3600`
+   - Default: `300`
 8. `Default sleep (s)` -> `defaultSleepS` options:
    - `600, 900, 1800, 3600`
 9. `Status interval (s)` -> `statusIntervalS` options:
    - `60, 120, 300, 600, 900, 1800`
 10. `Max charge current` -> `maxChargingCurrent` options:
     - `250, 500, 750, 1000`
+    - Default: `500 mA`
 11. `Max charge volt` -> `maxChargingVoltage` options:
     - `3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2`
+    - Default: `4.2 V`
 
 Text editor items:
 
@@ -408,5 +430,5 @@ Text editor items:
 
 Note:
 
-- The menu item label `Hibernate 10m` sends `cmd:hibernate` without `sleepSeconds`.
-- Actual sleep duration then follows runtime setting `defaultSleepS` (unless command payload provides `sleepSeconds` from backend).
+- The `Hibernate` menu item sends `cmd:hibernate` without `sleepSeconds`.
+- Actual sleep duration follows runtime setting `defaultSleepS` (unless command payload provides `sleepSeconds` from backend).

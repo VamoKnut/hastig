@@ -116,6 +116,11 @@ bool CommsEgress::publishAwakeJson(const char* json)
   return sendOrchCommand(_commandBus, OrchCommandType::PublishAwake, json);
 }
 
+bool CommsEgress::publishGaugingRequest()
+{
+  return sendOrchCommand(_commandBus, OrchCommandType::PublishGaugingRequest, nullptr);
+}
+
 bool CommsEgress::publishConfig()
 {
   return sendOrchCommand(_commandBus, OrchCommandType::PublishConfig, nullptr);

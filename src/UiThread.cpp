@@ -50,10 +50,19 @@ void UiThread::set_status(const char* line1, const char* line2)
 
 void UiThread::onItemSelectedEvent(const JsonVariantConst itemRetVal)
 {
+  const char* topic = itemRetVal["topic"] | "menu";
+  if (strcmp(topic, "display") == 0) {
+    const char* value = itemRetVal["value"] | "";
+    if (strcmp(value, "status") == 0) {
+      _deviceInfoMode = true;
+      _lastDeviceInfoRenderMs = 0;
+    }
+    return;
+  }
+
   UiEventMsg e{};
   e.ts_ms = timeutil::nowMs();
 
-  const char* topic = itemRetVal["topic"] | "menu";
   strncpy(e.topic, topic, sizeof(e.topic));
   e.topic[sizeof(e.topic) - 1] = '\0';
 
@@ -134,6 +143,14 @@ void UiThread::run()
       const BoardHal::Button appButton = b;
       post_key(appButton);
 
+      if (_deviceInfoMode) {
+        if (appButton == BoardHal::Button::Left || appButton == BoardHal::Button::Right) {
+          _deviceInfoMode = false;
+          _menu.refresh();
+        }
+        continue;
+      }
+
       if (_statusMode) {
         if (appButton == BoardHal::Button::Left || appButton == BoardHal::Button::Right) {
           _statusMode = false;
@@ -153,7 +170,13 @@ void UiThread::run()
       }
     }
 
-    if (_statusMode) {
+    if (_deviceInfoMode) {
+      const uint32_t now = timeutil::nowMs();
+      if (_lastDeviceInfoRenderMs == 0u || (now - _lastDeviceInfoRenderMs) >= 1000u) {
+        Display::getInstance().renderDeviceInfo(_runtimeStatus.getDeviceInfo());
+        _lastDeviceInfoRenderMs = now;
+      }
+    } else if (_statusMode) {
       renderStatus();
     } else if (menuReady) {
       const uint32_t settingsRevision = _settings.revision();
@@ -199,5 +222,5 @@ void UiThread::renderStatus()
   }
 
   const uint32_t remainingMs = _runtimeStatus.awareRemainingMs(timeutil::nowMs());
-  Display::getInstance().renderStatusAware(remainingMs);
+  Display::getInstance().renderStatusAware(remainingMs, _runtimeStatus.communicationReady());
 }

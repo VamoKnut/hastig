@@ -12,7 +12,6 @@
 #include "RestartReason.h"
 #include "BoardHal.h"
 #include "HastigGlobals.h"
-#include "WatchdogService.h"
 
 #include "Logger.h"
 #include "TimeUtil.h"
@@ -350,17 +349,16 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
     return;
   }
 
-  if (cmd.type == protocol::Command::Type::blockWatchdogKick) {
-    WatchdogService::blockKicksForTest();
-    return;
-  }
-
   LOGW(TAG, "Unknown command");
 }
 
 void Orchestrator::handleUiEvent(const UiEventMsg& uiEvt)
 {
   if (strcmp(uiEvt.topic, "key") == 0) {
+    return;
+  }
+
+  if (strcmp(uiEvt.topic, "display") == 0) {
     return;
   }
 
@@ -380,6 +378,13 @@ void Orchestrator::handleUiEvent(const UiEventMsg& uiEvt)
 
     if (commandType[0] == '\0') {
       LOGW(TAG, "UI cmd ignored (empty value)");
+      return;
+    }
+
+    if (strcmp(commandType, "requestGauging") == 0) {
+      if (!_commsEgress.publishGaugingRequest()) {
+        LOGW(TAG, "Gauging request could not be queued");
+      }
       return;
     }
 
@@ -484,6 +489,7 @@ void Orchestrator::checkTimeouts()
   BoardHal::BatterySnapshot battery;
   if (statusDue || chargeCheckDue) {
     battery = BoardHal::readBattery(hastig_battery());
+    _runtimeStatus.setBatteryInfo(battery.voltage, battery.current);
   }
 
   if (chargeCheckDue) {

@@ -4,6 +4,11 @@ static constexpr const char kLedMenuJson[] = R"JSON(
 {
   "items": [
     {
+      "label": "Request gauging",
+      "type": "action",
+      "retval": {"topic":"cmd", "value":"requestGauging"}
+    },
+    {
       "label": "Start sampling",
       "type": "action",
       "retval": {"topic":"cmd", "value":"startSampling"}
@@ -14,14 +19,9 @@ static constexpr const char kLedMenuJson[] = R"JSON(
       "retval": {"topic":"cmd", "value":"stopSampling"}
     },
     {
-      "label": "Hibernate 10m",
+      "label": "Hibernate",
       "type": "action",
       "retval": {"topic":"cmd", "value":"hibernate"}
-    },
-    {
-      "label": "Block WD kick",
-      "type": "action",
-      "retval": {"topic":"cmd", "value":"blockWatchdogKick"}
     },
     {
       "label": "Setup",
@@ -107,6 +107,7 @@ static constexpr const char kLedMenuJson[] = R"JSON(
           "label": "Aware timeout (s)",
           "type": "sel",
           "items": [
+            {"label":"30",   "retval":{"topic":"setup","prop":"awareTimeoutS","value":30}},
             {"label":"60",   "retval":{"topic":"setup","prop":"awareTimeoutS","value":60}},
             {"label":"300",  "retval":{"topic":"setup","prop":"awareTimeoutS","value":300}},
             {"label":"600",  "retval":{"topic":"setup","prop":"awareTimeoutS","value":600}},
@@ -176,6 +177,11 @@ static constexpr const char kLedMenuJson[] = R"JSON(
       "label": "Send config",
       "type": "action",
       "retval": {"topic":"cmd", "value":"getConfig"}
+    },
+    {
+      "label": "Show status",
+      "type": "action",
+      "retval": {"topic":"display", "value":"status"}
     }
   ]
 }

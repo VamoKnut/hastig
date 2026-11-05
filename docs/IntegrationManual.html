@@ -102,6 +102,8 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <li>data postfix: <code>data</code></li>
 <li>status postfix: <code>status</code></li>
 </ul>
+<h3 id="17-firmware-version-and-revision">1.7 Firmware version and revision</h3>
+<p>The status-information page displays the software version and build revision at the top as <code>v. &lt;major&gt;.&lt;minor&gt; r&lt;revision&gt;</code>. Major/minor values are defined in <code>include/HastigBuildRevision.h</code>; the M7 PlatformIO build counter supplies the numeric revision. During cellular and MQTT setup, the main status screen shows <code>Connecting...</code>; it changes to <code>AWARE</code> once MQTT is connected.</p>
 <p><code>nodeId</code> source:</p>
 <ul>
 <li><code>settings.device_name</code> if non-empty</li>
@@ -266,6 +268,10 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <ul>
 <li>Masked config keys for that section</li>
 </ul>
+<h4 id="f-type-gauging-request">F) <code>type = "gauging request"</code></h4>
+<p>The manually selected <code>Request gauging</code> menu action publishes this message to <code>/status</code>:</p>
+<pre><code class="language-json">{&quot;type&quot;:&quot;gauging request&quot;}</code></pre>
+<p>No additional keys are included.</p>
 <p>Notes:</p>
 <ul>
 <li>Secrets are masked as <code>"***"</code> when set (<code>simPin</code>, <code>apnUser</code>, <code>apnPass</code>, <code>mqttUser</code>, <code>mqttPass</code>).</li>
@@ -319,18 +325,22 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 </ul>
 <h3 id="32-top-level-menu-tree">3.2 Top-level menu tree</h3>
 <ol>
+<li><code>Request gauging</code> (publishes <code>{&quot;type&quot;:&quot;gauging request&quot;}</code>)</li>
 <li><code>Start sampling</code> (action -&gt; <code>cmd:startSampling</code>)</li>
 <li><code>Stop sampling</code> (action -&gt; <code>cmd:stopSampling</code>)</li>
-<li><code>Hibernate 10m</code> (action -&gt; <code>cmd:hibernate</code>)</li>
+<li><code>Hibernate</code> (action -&gt; <code>cmd:hibernate</code>; uses configured <code>defaultSleepS</code>)</li>
 <li><code>Setup</code> (submenu)</li>
 <li><code>Send config</code> (action -&gt; <code>cmd:getConfig</code>)</li>
+<li><code>Show status</code> (local display page: battery voltage, current consumption, IP address, SIM ICCID, hardware ID, version and build revision)</li>
 </ol>
+<p>Press Left or Right on the status page to return to the menu.</p>
 <h3 id="33-setup-submenu">3.3 Setup submenu</h3>
 <p>Numeric/select items:</p>
 <ol>
 <li><code>Sensor address</code> -&gt; <code>sensorAddress</code> options: <code>1..9</code></li>
 <li><code>Sensor baudrate</code> -&gt; <code>sensorBaudrate</code> options:</li>
 <li><code>1200, 4800, 9600, 19200, 38400, 57600, 115200</code></li>
+<li>Default: <code>38400</code></li>
 <li><code>Sensor warmup (ms)</code> -&gt; <code>sensorWarmupMs</code> options:</li>
 <li><code>500, 1000, 2000, 4000, 5000, 10000</code></li>
 <li><code>Sensor type</code> -&gt; <code>sensorType</code> options:</li>
@@ -340,17 +350,19 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <li><code>Agg period (s)</code> -&gt; <code>aggPeriodS</code> options:</li>
 <li><code>10, 15, 20, 30, 60, 120, 300, 600</code></li>
 <li><code>Aware timeout (s)</code> -&gt; <code>awareTimeoutS</code> options:</li>
-<li><code>60, 300, 600, 900, 1800, 3600</code></li>
+<li><code>30, 60, 300, 600, 900, 1800, 3600</code>; default: <code>300</code></li>
 <li><code>Default sleep (s)</code> -&gt; <code>defaultSleepS</code> options:</li>
 <li><code>600, 900, 1800, 3600</code></li>
 <li><code>Status interval (s)</code> -&gt; <code>statusIntervalS</code> options:</li>
 <li><code>60, 120, 300, 600, 900, 1800</code></li>
 <li><code>Max charge current</code> -&gt; <code>maxChargingCurrent</code> options:<ul>
 <li><code>250, 500, 750, 1000</code></li>
+<li>Default: <code>500 mA</code></li>
 </ul>
 </li>
 <li><code>Max charge volt</code> -&gt; <code>maxChargingVoltage</code> options:<ul>
 <li><code>3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2</code></li>
+<li>Default: <code>4.2 V</code></li>
 </ul>
 </li>
 </ol>
@@ -380,7 +392,7 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 </ul>
 <p>Note:</p>
 <ul>
-<li>The menu item label <code>Hibernate 10m</code> sends <code>cmd:hibernate</code> without <code>sleepSeconds</code>.</li>
+<li>The <code>Hibernate</code> menu item sends <code>cmd:hibernate</code> without <code>sleepSeconds</code>.</li>
 <li>Actual sleep duration then follows runtime setting <code>defaultSleepS</code> (unless command payload provides <code>sleepSeconds</code> from backend).</li>
 </ul>
 </body>

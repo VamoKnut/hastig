@@ -15,7 +15,7 @@ struct AppSettings {
 
   // Sensor serial settings
   uint8_t  sensor_addr = 1;
-  uint32_t sensor_baud = 9600;
+  uint32_t sensor_baud = 38400;
 
   // Sensor behavior
   uint32_t sensor_warmup_ms = 4000;
@@ -42,12 +42,12 @@ struct AppSettings {
   char device_name[48] = "Hastig";
 
   // Behavior
-  uint32_t aware_timeout_s     = 600;
+  uint32_t aware_timeout_s     = 300;
   uint32_t default_sleep_s     = 3600;
   uint32_t status_interval_s   = 120;
   float    low_batt_min_v      = 2.8f;
-  uint16_t max_charging_current = 1000;
-  float    max_charging_voltage = 3.64f;
+  uint16_t max_charging_current = 500;
+  float    max_charging_voltage = 4.2f;
   uint32_t emergency_delay_s   = 60;
   uint32_t emergency_sleep_s   = 43200;
   uint32_t max_forced_sleep_s  = 43200;

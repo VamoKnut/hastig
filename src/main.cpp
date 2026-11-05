@@ -4,6 +4,7 @@
 #if defined(CORE_CM7)
 #include <mbed.h>
 #include <Arduino_PowerManagement.h>
+#include <stdio.h>
 
 #include "AppConfig.h"
 #include "HastigBuildRevision.h"
@@ -61,7 +62,13 @@ void setup()
   //BoardHal::configurePins();
 
   Display::getInstance().beginHardware();
-  Display::getInstance().showSplash(HASTIG_AI_REVISION);
+  char versionRevision[32];
+  snprintf(versionRevision, sizeof(versionRevision), "v. %u.%u r%lu",
+           (unsigned)HASTIG_VERSION_MAJOR,
+           (unsigned)HASTIG_VERSION_MINOR,
+           (unsigned long)HASTIG_AI_REVISION);
+  Display::getInstance().setFirmwareRevision(versionRevision);
+  Display::getInstance().showSplash();
 
   Serial.begin(115200);
   Logger::begin(Serial, 115200);
@@ -79,7 +86,7 @@ void setup()
   WatchdogService::kick();
   Logger::set_runtime_level(Logger::Level::Debug);
 
-  LOGI(TAG, "=== Hastig-H7-1 Boot (AI Revision: %s) ===", HASTIG_AI_REVISION);
+  LOGI(TAG, "=== Hastig-H7-1 Boot (%s) ===", versionRevision);
   LOGI(TAG, "Last restart reason: %s (bootCount=%lu)",
        RestartReasonStore::toString(lastRestartReason),
        (unsigned long)restartReason.bootCount());

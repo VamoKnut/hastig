@@ -18,10 +18,6 @@
 #define DISP_TERMINAL_LINES 8
 #define DISP_LIST_LINE_STEP 11
 #define DISP_LIST_MARKER_SIZE 7
-#define DISP_REV_BOX_W 44
-#define DISP_REV_BOX_H 10
-#define DISP_REV_TEXT_X 1
-#define DISP_REV_TEXT_Y 8
 #define DISP_EDITOR_LINE1_Y 0
 #define DISP_EDITOR_LINE2_Y 12
 #define DISP_EDITOR_GRID_Y 24
@@ -44,6 +40,7 @@ Display& Display::getInstance()
 
 Display::Display() : _oled(nullptr), _hardwareStarted(false)
 {
+   _firmwareRevision[0] = '\0';
 }
 
 void Display::beginHardware()
@@ -69,6 +66,12 @@ void Display::turnOn(bool status)
       return;
    }
    _oled->setPowerSave(status ? 0 : 1);
+}
+
+void Display::setFirmwareRevision(const char* revisionText)
+{
+   snprintf(_firmwareRevision, sizeof(_firmwareRevision), "%s",
+            revisionText != nullptr ? revisionText : "");
 }
 
 void Display::drawCentered(const char* text, uint8_t y)
@@ -189,28 +192,29 @@ void Display::listSelectableItems(MenuNode* selectedNode, IMenuItemSelectedEvent
    _oled->sendBuffer();
 }
 
-void Display::renderStatusAware(uint32_t remainingMs)
+void Display::renderStatusAware(uint32_t remainingMs, bool communicationReady)
 {
    if (_oled == nullptr)
    {
       return;
    }
 
-   const uint32_t totalSec = remainingMs / 1000u;
-   const uint32_t mm = totalSec / 60u;
-   const uint32_t ss = totalSec % 60u;
-
-   char timeBuf[12];
-   snprintf(timeBuf, sizeof(timeBuf), "%02lu:%02lu", (unsigned long)mm, (unsigned long)ss);
-
    _oled->clearBuffer();
    _oled->setFontPosTop();
    _oled->setFont(DISP_FONT_MENU_NORMAL);
-   drawCentered("AWARE", 0);
+   drawCentered(communicationReady ? "AWARE" : "Connecting...", 0);
 
-   _oled->setFont(DISP_FONT_LIST);
-   _oled->drawStr(DISP_MENU_LEFT_MARGIN, 18, "Time til hiberate");
-   drawCentered(timeBuf, 30);
+   if (communicationReady) {
+      const uint32_t totalSec = remainingMs / 1000u;
+      const uint32_t mm = totalSec / 60u;
+      const uint32_t ss = totalSec % 60u;
+      char timeBuf[12];
+      snprintf(timeBuf, sizeof(timeBuf), "%02lu:%02lu", (unsigned long)mm, (unsigned long)ss);
+
+      _oled->setFont(DISP_FONT_LIST);
+      _oled->drawStr(DISP_MENU_LEFT_MARGIN, 18, "Time til hiberate");
+      drawCentered(timeBuf, 30);
+   }
    _oled->sendBuffer();
 }
 
@@ -230,7 +234,7 @@ void Display::renderStatusSampling(const SensorSampleMsg& sample, bool hasSample
 
    if (!hasSample)
    {
-      _oled->drawStr(DISP_MENU_LEFT_MARGIN, 18, "No sample");
+      _oled->drawStr(DISP_MENU_LEFT_MARGIN, 24, "No sample");
       _oled->sendBuffer();
       return;
    }
@@ -241,8 +245,37 @@ void Display::renderStatusSampling(const SensorSampleMsg& sample, bool hasSample
    char line1[28];
    snprintf(line0, sizeof(line0), "%s: %.2f", k0, (double)sample.v0);
    snprintf(line1, sizeof(line1), "%s: %.2f", k1, (double)sample.v1);
-   _oled->drawStr(DISP_MENU_LEFT_MARGIN, 18, line0);
-   _oled->drawStr(DISP_MENU_LEFT_MARGIN, 30, line1);
+   _oled->drawStr(DISP_MENU_LEFT_MARGIN, 24, line0);
+   _oled->drawStr(DISP_MENU_LEFT_MARGIN, 36, line1);
+   _oled->sendBuffer();
+}
+
+void Display::renderDeviceInfo(const RuntimeStatus::DeviceInfo& info)
+{
+   if (_oled == nullptr) {
+      return;
+   }
+
+   char line[64];
+   _oled->clearBuffer();
+   _oled->setFontPosTop();
+   _oled->setFont(u8g2_font_4x6_tf);
+   drawCentered(_firmwareRevision, 0);
+
+   _oled->setFont(u8g2_font_5x8_tf);
+
+   snprintf(line, sizeof(line), "Battery: %.2f V", (double)info.batteryVoltage);
+   _oled->drawStr(0, 9, line);
+   snprintf(line, sizeof(line), "Current: %.0f mA", (double)info.currentMa);
+   _oled->drawStr(0, 19, line);
+
+   _oled->setFont(u8g2_font_4x6_tf);
+   snprintf(line, sizeof(line), "IP: %s", info.ipAddress);
+   _oled->drawStr(0, 30, line);
+   snprintf(line, sizeof(line), "SIM: %s", info.iccid);
+   _oled->drawStr(0, 39, line);
+   snprintf(line, sizeof(line), "HW ID: %s", info.hardwareId);
+   _oled->drawStr(0, 48, line);
    _oled->sendBuffer();
 }
 
@@ -364,7 +397,7 @@ void Display::terminalTest(const std::vector<String>& lines, int lineOffset)
    _oled->sendBuffer();
 }
 
-void Display::showSplash(const char* revisionText)
+void Display::showSplash()
 {
    if (_oled == nullptr)
    {
@@ -376,16 +409,7 @@ void Display::showSplash(const char* revisionText)
    }
 
    _oled->clearBuffer();
-   _oled->drawXBMP(0, 0, 128, 64, epd_bitmap_Hastig_v1);
-
-   if (revisionText != nullptr && revisionText[0] != '\0')
-   {
-      _oled->setDrawColor(0);
-      _oled->drawBox(0, 0, DISP_REV_BOX_W, DISP_REV_BOX_H);
-      _oled->setDrawColor(1);
-      _oled->setFont(DISP_FONT_LIST);
-      _oled->drawStr(DISP_REV_TEXT_X, DISP_REV_TEXT_Y, revisionText);
-   }
+   _oled->drawXBMP(0, 0, 128, 64, epd_bitmap_Hastig_v2);
 
    _oled->sendBuffer();
 }

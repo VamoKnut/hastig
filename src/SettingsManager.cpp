@@ -11,8 +11,8 @@
 #include <string.h>
 
 static const char* TAG = "SET";
-static constexpr uint32_t kMinAwareTimeoutS   = 60u;
-static constexpr uint32_t kDefaultAwareTimeoutS = 600u;
+static constexpr uint32_t kMinAwareTimeoutS   = 30u;
+static constexpr uint32_t kDefaultAwareTimeoutS = 300u;
 static constexpr uint32_t kMinDefaultSleepS   = 60u;
 static constexpr uint32_t kDefaultSleepS      = 3600u;
 static constexpr uint32_t kMinStatusIntervalS = 30u;
