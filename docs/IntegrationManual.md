@@ -124,7 +124,7 @@ Mandatory for all command messages:
 
 Supported `type` values and optional keys:
 
-1. `keepSampling`
+1. `keepSampling` (`KeepSampling` is also accepted)
    - Optional keys: none
 2. `startSampling`
    - Optional keys:
@@ -150,6 +150,12 @@ Example:
 ```json
 {"type":"startSampling","samplingInterval":1000,"aggPeriodS":30,"sessionID":"A1"}
 ```
+
+`samplingInterval` and `aggPeriodS` in `startSampling` apply only to that sampling
+session. They do not change the stored settings or the values returned by
+`getConfig`. Each new `startSampling` request uses the stored default for any
+omitted timing value; overrides from the previous session are discarded. To
+change the stored defaults, send a `/cfg` patch.
 
 ---
 

@@ -130,7 +130,7 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 </ul>
 <p>Supported <code>type</code> values and optional keys:</p>
 <ol>
-<li><code>keepSampling</code></li>
+<li><code>keepSampling</code> (also accepts <code>KeepSampling</code>)</li>
 <li>Optional keys: none</li>
 <li><code>startSampling</code></li>
 <li>Optional keys:<ul>
@@ -158,6 +158,11 @@ hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
 <p>Example:</p>
 <pre><code class="language-json">{&quot;type&quot;:&quot;startSampling&quot;,&quot;samplingInterval&quot;:1000,&quot;aggPeriodS&quot;:30,&quot;sessionID&quot;:&quot;A1&quot;}
 </code></pre>
+<p><code>samplingInterval</code> and <code>aggPeriodS</code> in <code>startSampling</code> apply only to that sampling
+session. They do not change the stored settings or the values returned by
+<code>getConfig</code>. Each new <code>startSampling</code> request uses the stored default for any
+omitted timing value; overrides from the previous session are discarded. To
+change the stored defaults, send a <code>/cfg</code> patch.</p>
 <hr />
 <h3 id="23-incoming-messages-cfg">2.3 Incoming messages (<code>/cfg</code>)</h3>
 <p><code>/cfg</code> payload is a JSON patch. No key is mandatory; include only keys to update.</p>

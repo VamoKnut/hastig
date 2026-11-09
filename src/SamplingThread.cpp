@@ -19,7 +19,7 @@ AppSettings readSettingsSnapshot(SettingsManager& settings, uint32_t& revision)
    do
    {
       revision = settings.revision();
-      snapshot = settings.getCopy();
+      snapshot = settings.getSamplingCopy();
    } while (revision != settings.revision());
    return snapshot;
 }

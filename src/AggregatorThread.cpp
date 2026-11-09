@@ -157,7 +157,7 @@ void AggregatorThread::run()
          continue;
       }
 
-      const AppSettings s        = _settings.getCopy();
+      const AppSettings s        = _settings.getSamplingCopy();
       const uint32_t    windowMs = s.agg_period_s * 1000u;
 
       AggregateAccumulator acc;

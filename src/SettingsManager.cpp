@@ -155,6 +155,44 @@ AppSettings SettingsManager::getCopy() const
   return _s;
 }
 
+AppSettings SettingsManager::getSamplingCopy() const
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  AppSettings s = _s;
+  if (_sessionSamplePeriodMs != 0u) {
+    s.sample_period_ms = _sessionSamplePeriodMs;
+  }
+  if (_sessionAggPeriodS != 0u) {
+    s.agg_period_s = _sessionAggPeriodS;
+  }
+  return s;
+}
+
+void SettingsManager::startSamplingSession(bool hasSamplePeriod, uint32_t samplePeriodMs,
+                                          bool hasAggPeriod, uint32_t aggPeriodS)
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  _sessionSamplePeriodMs = hasSamplePeriod
+      ? (samplePeriodMs < MIN_SAMPLE_PERIOD_MS ? MIN_SAMPLE_PERIOD_MS : samplePeriodMs)
+      : 0u;
+  _sessionAggPeriodS = 0u;
+  if (hasAggPeriod) {
+    _sessionAggPeriodS = aggPeriodS == 0u ? 1u : aggPeriodS;
+    if (_sessionAggPeriodS > kMaxIntervalS) {
+      _sessionAggPeriodS = kMaxIntervalS;
+    }
+  }
+  _revision++;
+}
+
+void SettingsManager::endSamplingSession()
+{
+  mbed::ScopedLock<rtos::Mutex> lock(_mx);
+  _sessionSamplePeriodMs = 0u;
+  _sessionAggPeriodS = 0u;
+  _revision++;
+}
+
 /**
  * @brief Apply JSON patch to settings.
  */
@@ -385,6 +423,8 @@ bool SettingsManager::loadFromFlash()
 void SettingsManager::setDefaults()
 {
   _s = AppSettings{};
+  _sessionSamplePeriodMs = 0u;
+  _sessionAggPeriodS = 0u;
   strncpy(_s.device_name, "", sizeof(_s.device_name));
   _s.device_name[sizeof(_s.device_name) - 1] = '\0';
 }

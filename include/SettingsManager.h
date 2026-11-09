@@ -70,6 +70,14 @@ public:
    */
   AppSettings getCopy() const;
 
+  /** @brief Settings for sampling workers, including session-only overrides. */
+  AppSettings getSamplingCopy() const;
+
+  /** @brief Replace timing overrides for a new sampling session (never persisted). */
+  void startSamplingSession(bool hasSamplePeriod, uint32_t samplePeriodMs,
+                            bool hasAggPeriod, uint32_t aggPeriodS);
+  void endSamplingSession();
+
   /** @brief Update settings in RAM only (no flash write). */
   void setRuntime(const AppSettings& s);
 
@@ -106,7 +114,7 @@ public:
   void addMaskedConfigFields(JsonDocument& doc, ConfigSection section) const;
 
   /**
-   * @brief Monotonic revision that increments when runtime settings are updated.
+   * @brief Monotonic revision for settings updates, including session overrides.
    */
   uint32_t revision() const;
 
@@ -121,6 +129,9 @@ private:
   mutable rtos::Mutex _mx;
   AppSettings         _s;
   uint32_t            _revision = 0;
+  // Zero means use the stored default; explicit request values are clamped above zero.
+  uint32_t            _sessionSamplePeriodMs = 0;
+  uint32_t            _sessionAggPeriodS = 0;
 
   bool loadFromFlash();
   bool saveUnlocked();

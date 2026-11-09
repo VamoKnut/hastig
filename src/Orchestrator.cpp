@@ -175,6 +175,9 @@ void Orchestrator::enterState(State s)
   const bool  isModeChange = (previousMode[0] != '\0') && (newMode[0] != '\0') && (strcmp(previousMode, newMode) != 0);
 
   _state        = s;
+  if (prevState == State::Sampling && s != State::Sampling) {
+    _settings.endSamplingSession();
+  }
   _stateEnterMs = timeutil::nowMs();
   _lastActivityMs = _stateEnterMs;
   _runtimeStatus.setMode(s == State::Sampling
@@ -276,31 +279,13 @@ void Orchestrator::handleServerCommand(const char* topic, const char* json)
   }
 
   if (cmd.type == protocol::Command::Type::startSampling) {
-    // Optional overrides
-    JsonDocument patch;
-
-    if (cmd.hasSamplingInterval) {
-      uint32_t v = cmd.samplingInterval;
-      if (v < MIN_SAMPLE_PERIOD_MS) {
-        v = MIN_SAMPLE_PERIOD_MS;
-      }
-      patch["samplingInterval"] = v;
-    }
-
-    if (cmd.hasAggPeriodS) {
-      patch["aggPeriodS"] = cmd.aggPeriodS;
-    }
+    _settings.startSamplingSession(cmd.hasSamplingInterval, cmd.samplingInterval,
+                                  cmd.hasAggPeriodS, cmd.aggPeriodS);
 
     if (cmd.hasSessionId) {
       _clock.startNewSession(cmd.sessionId);
     } else {
       _clock.startNewSession(nullptr);
-    }
-
-    if (patch.size() > 0) {
-      char buf[256];
-      serializeJson(patch, buf, sizeof(buf));
-      _commsEgress.applySettingsJson(buf);
     }
 
     enterState(State::Sampling);
@@ -552,7 +537,7 @@ void Orchestrator::checkTimeouts()
       limit = 1u;
     }
     uint64_t ackTimeoutMs =
-        static_cast<uint64_t>(s.agg_period_s) * 1000ULL * limit;
+        static_cast<uint64_t>(_settings.getSamplingCopy().agg_period_s) * 1000ULL * limit;
     if (ackTimeoutMs > MAX_ACK_TIMEOUT_MS) {
       ackTimeoutMs = MAX_ACK_TIMEOUT_MS;
     }
@@ -599,9 +584,16 @@ void Orchestrator::run()
       enterState(State::Hibernating);
     }
 
-    // Unified FIFO event stream from UI, communications, and workers.
-    DeviceEvent evt;
-    if (_eventBus.tryGetNext(evt, 20)) {
+    // Drain queued events before checking timeouts so a pending keepSampling
+    // acknowledgement is not overtaken by the sampling timeout.
+    bool waitForEvent = true;
+    for (uint32_t processedEvents = 0; processedEvents < QUEUE_DEPTH_ORCH_EVENTS; ++processedEvents) {
+      DeviceEvent evt;
+      if (!_eventBus.tryGetNext(evt, waitForEvent ? 20u : 0u)) {
+        break;
+      }
+      waitForEvent = false;
+
       if (evt.type == DeviceEvent::Type::Ui) {
         _lastActivityMs = nowMs;
         handleUiEvent(evt.data.ui);

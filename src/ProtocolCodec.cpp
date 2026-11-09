@@ -12,7 +12,7 @@ static Command::Type decodeType(const char* type)
     return Command::Type::unknown;
   }
 
-  if (strcmp(type, kCmdKeepSampling) == 0) {
+  if (strcmp(type, kCmdKeepSampling) == 0 || strcmp(type, "KeepSampling") == 0) {
     return Command::Type::keepSampling;
   }
   if (strcmp(type, kCmdStartSampling) == 0) {
